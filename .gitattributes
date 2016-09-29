@@ -1,0 +1,7 @@
+*.[ch] whitespace=tab-in-indent,trailing-space
+*.cc whitespace=tab-in-indent,trailing-space
+*.cpp whitespace=tab-in-indent,trailing-space
+*.cxx whitespace=tab-in-indent,trailing-space
+*.hh whitespace=tab-in-indent,trailing-space
+*.hpp whitespace=tab-in-indent,trailing-space
+*.hxx whitespace=tab-in-indent,trailing-space
