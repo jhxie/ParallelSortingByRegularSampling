@@ -4,10 +4,24 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-int array_generate(long **array, size_t length, unsigned int seed)
+int array_generate(long **const array, const size_t length, unsigned int seed)
 {
         long *temp_ptr = NULL;
 
+        /*
+         * According to 29.2 (chapter 29 section 2) of
+         * "The Linux Programming Interface":
+         *
+         * On Linux, a thread-specific errno is achieved in a similar manner
+         * to most other UNIX implementations:
+         *
+         * errno is defined as a macro that expands into a function call
+         * returning a modifiable lvalue that is distinct for each thread.
+         *
+         * (Since the lvalue is modifiable, it is still possible to write
+         * assignment statements of the form errno = value in threaded
+         * programs.)
+         */
         if (NULL == array || 0U == length) {
                 errno = EINVAL;
                 return -1;
@@ -33,7 +47,7 @@ int array_generate(long **array, size_t length, unsigned int seed)
         return 0;
 }
 
-int array_destroy(long **array)
+int array_destroy(long **const array)
 {
         if (NULL == array) {
                 errno = EINVAL;
