@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
         if (0 > argument_parse(&arg, argc, argv)) {
                 err(EXIT_FAILURE, NULL);
         }
-        /* sort_launch(&arg); */
+        sort_launch(&arg);
         /*
          * According to 29.4 (chapter 29 section 4) of
          * "The Linux Programming Interface":
@@ -37,8 +37,10 @@ int main(int argc, char *argv[])
          * If the main thread calls pthread_exit() instead of calling exit()
          * or performing a return , then the other threads continue to execute.
          */
+#if 0
         printf("-l %zu -r %zu -s %u -t %u\n",
                arg.length, arg.run, arg.seed, arg.thread);
+#endif
         return EXIT_SUCCESS;
 }
 

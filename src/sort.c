@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 /*
  * According to 29.3 (chapter 29 section 3) of
@@ -48,39 +49,46 @@
  */
 int sort_launch(const struct cli_arg *const arg)
 {
-        double elapsed = .0;
-        long *array = NULL;
+        double elapsed = .0, average = .0;
+        long *unsorted_array = NULL, *array = NULL;
         pthread_t *control_block = NULL;
         struct timespec start;
+        const size_t array_total_size = sizeof(long) * arg->length;
+
+        unsorted_array = malloc(array_total_size);
         control_block = malloc(sizeof(pthread_t) * arg->thread);
 
-        if (NULL == control_block) {
+        if (NULL == unsorted_array || NULL == control_block) {
                 return -1;
         }
-        if (-1 == array_generate(&array, arg->length, 1)) {
+        if (-1 == array_generate(&array, arg->length, arg->seed)) {
                 return -1;
         }
-        array_destroy(&array);
-#if 0
-        size_t length = 9999999UL;
-
-        if (-1 == array_generate(&array, length, 1)) {
-                return EXIT_FAILURE;
+        /* Use unsorted_array as a backup to be reverted later. */
+        memcpy(unsorted_array, array, array_total_size);
+        /*
+         * If the number of threads needs to be executed is 1, pthread APIs
+         * need not to be invoked.
+         */
+        if (1U == arg->thread) {
+                for (size_t iteration = 0; iteration < arg->run; ++iteration) {
+                        timing_start(&start);
+                        qsort(array, arg->length, sizeof(long), long_compare);
+                        timing_stop(&elapsed, &start);
+                        timing_reset(&start);
+                        /* Revert the unsorted_array back into array. */
+                        memcpy(array, unsorted_array, array_total_size);
+                        average += elapsed;
+                        elapsed = .0;
+                }
+                average /= (double)arg->run;
+                printf("%f\n", average);
+        } else {
         }
-        puts("Before Sorting");
 
-        timing_start(&start);
-        qsort(array, length, sizeof(long), long_compare);
-        timing_stop(&elapsed, &start);
-        puts("\nAfter Sorting");
-
+        array_destroy(&unsorted_array);
         array_destroy(&array);
-
-        printf("It takes %f seconds to sort.\n", elapsed);
-        if (NULL == array) {
-                puts("Success");
-        }
-#endif
+        free(control_block);
         return 0;
 }
 

@@ -15,6 +15,18 @@ int timing_start(struct timespec *start)
         return 0;
 }
 
+int timing_reset(struct timespec *start)
+{
+        if (NULL == start) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        start->tv_sec = 0;
+        start->tv_nsec = 0;
+        return 0;
+}
+
 int timing_stop(double *elapsed, const struct timespec *start)
 {
         struct timespec result = { .tv_nsec = 0 }, end = { .tv_nsec = 0 };
