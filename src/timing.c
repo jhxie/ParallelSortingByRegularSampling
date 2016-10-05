@@ -17,7 +17,7 @@ int timing_start(struct timespec *start)
 
 int timing_stop(double *elapsed, const struct timespec *start)
 {
-        struct timespec result, end;
+        struct timespec result = { .tv_nsec = 0 }, end = { .tv_nsec = 0 };
         const static long NS_PER_SEC = 1000000000;
 
         if (NULL == elapsed || NULL == start) {

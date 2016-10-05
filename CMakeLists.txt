@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(psrs C)
 
 # the short system name, e.g. "Linux", "FreeBSD" or "Windows"
@@ -39,6 +39,10 @@ set(CMAKE_C_STANDARD 99)
 # i.e. make the c99 standard a requirement
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# make sure that our source directory is on the current cmake module path so
+# that we can include cmake files from this directory
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+
 # test the existence of pthread run-time on the system
 find_package(Threads REQUIRED)
 if(NOT CMAKE_THREAD_LIBS_INIT)
@@ -51,10 +55,22 @@ else()
     endif()
 endif()
 
+# test the existence of python 3 interpreter
+set(Python_ADDITIONAL_VERSIONS 3.5)
+find_package(PythonInterp)
+if(NOT PYTHONINTERP_FOUND)
+    message(WARNING "Python 3.5 is required to run the plotting program!")
+endif()
+
+find_package(Matplotlib)
+if(NOT MATPLOTLIB_FOUND)
+    message(WARNING "Matplotlib is required to plot the speed graph!")
+endif()
+
 # common header(s) reside(s) in the include directory in the
 # relative root directory of this project
 include_directories(
     ${PROJECT_SOURCE_DIR}/include
-    )
+)
 
 add_subdirectory(src)
