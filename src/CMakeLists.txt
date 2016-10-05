@@ -5,7 +5,8 @@
 # SET(BUILD_SHARED_LIBRARIES OFF)
 # SET(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++ -static")
 
-add_executable(psrs psrs.c generator.c timing.c)
+add_executable(psrs psrs.c generator.c sort.c timing.c)
+target_link_libraries(psrs ${CMAKE_THREAD_LIBS_INIT})
 
 # target_link_libraries(timestamp ${CMAKE_THREAD_LIBS_INIT})
 # install(TARGETS main

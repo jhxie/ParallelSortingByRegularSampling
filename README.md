@@ -9,7 +9,7 @@ algorithm.
 * [Python](https://www.python.org/) interpreter (**3.5+**).
 * [Matplotlib](http://matplotlib.org/) plotting library.
 
-**Ubuntu**  
+**Ubuntu** (>= 16.04)  
 ```bash
 sudo apt-get install build-essential cmake cmake-extras extra-cmake-modules python3-matplotlib
 ```

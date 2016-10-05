@@ -1,17 +1,15 @@
+#define PSRS_SORT_ONLY
+#include "psrs/sort.h"
+#undef PSRS_SORT_ONLY
+
 #include "psrs/generator.h"
+#include "psrs/psrs.h"
 #include "psrs/timing.h"
 
+#include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
-
-int long_compare(const void *left, const void *right)
-{
-        const long left_long = *((const long *)left);
-        const long right_long = *((const long *)right);
-
-        return (left_long < right_long ? -1 : left_long > right_long ? 1 : 0);
-}
-
 
 /*
  * According to 29.3 (chapter 29 section 3) of
@@ -48,11 +46,22 @@ int long_compare(const void *left, const void *right)
  * on
  * any of the implementations on which the application is to run.
  */
-int sort_launch()
+int sort_launch(const struct cli_arg *const arg)
 {
-        long *array = NULL;
-        struct timespec start;
         double elapsed = .0;
+        long *array = NULL;
+        pthread_t *control_block = NULL;
+        struct timespec start;
+        control_block = malloc(sizeof(pthread_t) * arg->thread);
+
+        if (NULL == control_block) {
+                return -1;
+        }
+        if (-1 == array_generate(&array, arg->length, 1)) {
+                return -1;
+        }
+        array_destroy(&array);
+#if 0
         size_t length = 9999999UL;
 
         if (-1 == array_generate(&array, length, 1)) {
@@ -70,6 +79,76 @@ int sort_launch()
         printf("It takes %f seconds to sort.\n", elapsed);
         if (NULL == array) {
                 puts("Success");
+        }
+#endif
+        return 0;
+}
+
+void *parallel_sort(void *arg)
+{
+        return NULL;
+}
+
+static int long_compare(const void *left, const void *right)
+{
+        const long left_long = *((const long *)left);
+        const long right_long = *((const long *)right);
+
+        return (left_long < right_long ? -1 : left_long > right_long ? 1 : 0);
+}
+
+/*
+ * NOTE:
+ * It is callers' responsibility to ensure there are enough memory allcated for
+ * the output array.
+ *
+ * Merge algorithm is from Section 2 Mergesort: Algorithm 2 of the
+ * CME 323 lecture note 3.
+ * Link:
+ * http://stanford.edu/~rezab/dao/notes/Lecture03/cme323_lec3.pdf
+ */
+static int array_merge(long output[const],
+                       long left[const],
+                       const size_t lsize,
+                       long right[const],
+                       const size_t rsize)
+{
+        size_t lindex = 0U, rindex = 0U, oindex = 0U;
+
+        if (!output || !left || !right || 0U == lsize || 0U == rsize) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        for (; lindex < lsize && rindex < rsize; ++oindex) {
+                if (left[lindex] < right[rindex]) {
+                        output[oindex] = left[lindex];
+                        ++lindex;
+                } else {
+                        output[oindex] = right[rindex];
+                        ++rindex;
+                }
+        }
+
+        /*
+         * If any one of the left or right array is not exhausted, append all
+         * the remaining into the output array.
+         *
+         * Both if conditionals may seem redundant but in general one guideline
+         * from "The Zen of Python" is followed throughout the implementation
+         * of this program:
+         * "Explicit is better than implicit."
+         */
+        if (lindex < lsize) {
+                for (; lindex < lsize; ++lindex, ++oindex) {
+                        output[oindex] = left[lindex];
+                }
+        }
+
+        if (rindex < rsize) {
+                for (; rindex < rsize; ++rindex, ++oindex) {
+                        output[oindex] = right[rindex];
+                }
         }
         return 0;
 }

@@ -1,14 +1,17 @@
-#define PSRS_ONLY
-#include "psrs/psrs.h"
-#undef PSRS_ONLY
-
-#include "psrs/timing.h"
 #include "psrs/macro.h"
+#define PSRS_PSRS_ONLY
+#include "psrs/psrs.h"
+#undef PSRS_PSRS_ONLY
 
+#include "psrs/sort.h"
+#include "psrs/timing.h"
+
+#include <err.h>
 #include <errno.h>
 #include <getopt.h>      /* getopt_long() */
 #include <inttypes.h>    /* uintmax_t */
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>      /* strdup() */
@@ -17,11 +20,12 @@
 
 int main(int argc, char *argv[])
 {
-        struct argument arg;
+        struct cli_arg arg;
 
         if (0 > argument_parse(&arg, argc, argv)) {
-                return EXIT_FAILURE;
+                err(EXIT_FAILURE, NULL);
         }
+        /* sort_launch(&arg); */
         /*
          * According to 29.4 (chapter 29 section 4) of
          * "The Linux Programming Interface":
@@ -33,18 +37,20 @@ int main(int argc, char *argv[])
          * If the main thread calls pthread_exit() instead of calling exit()
          * or performing a return , then the other threads continue to execute.
          */
-        printf("-l %zu -t %u -r %zu\n", arg.length, arg.thread, arg.run);
+        printf("-l %zu -r %zu -s %u -t %u\n",
+               arg.length, arg.run, arg.seed, arg.thread);
         return EXIT_SUCCESS;
 }
 
-static int argument_parse(struct argument *result, int argc, char *argv[])
+static int argument_parse(struct cli_arg *result, int argc, char *argv[])
 {
         /* NOTE: All the flags followed by an extra colon require arguments. */
-        const static char *const OPT_STR = ":hl:r:t:";
+        const static char *const OPT_STR = ":hl:r:s:t:";
         const static struct option OPTS[] = {
                 {"help",     no_argument,       NULL, 'h'},
                 {"length",   required_argument, NULL, 'l'},
                 {"run",      required_argument, NULL, 'r'},
+                {"seed",     required_argument, NULL, 's'},
                 {"thread",   required_argument, NULL, 't'},
                 {
                         .name    = NULL,
@@ -56,10 +62,11 @@ static int argument_parse(struct argument *result, int argc, char *argv[])
         enum {
                 LENGTH,
                 RUN,
+                SEED,
                 THREAD,
                 NUM_OF_CMD_ARGS
         };
-        bool all_argument_present = true;
+        bool all_arguments_present = true;
         bool check[NUM_OF_CMD_ARGS] = { false };
         /*
          * NOTE:
@@ -106,6 +113,15 @@ static int argument_parse(struct argument *result, int argc, char *argv[])
                         check[RUN] = true;
                         break;
                 }
+                case 's': {
+                        if (0 > unsigned_convert(&result->seed, optarg)) {
+                                usage_show(program_name,
+                                           EXIT_FAILURE,
+                                           "Seed is too large or not valid");
+                        }
+                        check[SEED] = true;
+                        break;
+                }
                 case 't': {
                         if (0 > unsigned_convert(&result->thread, optarg)) {
                                 usage_show(program_name,
@@ -130,13 +146,29 @@ static int argument_parse(struct argument *result, int argc, char *argv[])
         }
 
         for (size_t i = 0; i < (size_t)NUM_OF_CMD_ARGS; ++i) {
-                all_argument_present &= check[i];
+                all_arguments_present &= check[i];
         }
 
-        if (false == all_argument_present) {
+        if (false == all_arguments_present) {
                 usage_show(program_name,
                            EXIT_FAILURE,
-                           "Length, run, thread argument must be supplied");
+                           "Length, run, seed, thread argument "
+                           "must be all supplied");
+        }
+
+        if (0U == result->length || 0U == result->run || \
+            0U == result->seed || 0U == result->thread) {
+                usage_show(program_name,
+                           EXIT_FAILURE,
+                           "Length, run, seed, thread argument "
+                           "must be all positive");
+        }
+
+        /* length can not be fit into a dynamically allocated array. */
+        if ((SIZE_MAX / sizeof(long)) < result->length) {
+                usage_show(program_name,
+                           EXIT_FAILURE,
+                           "Length is larger than (SIZE_MAX / sizeof(long))");
         }
         free(program_name);
         return 0;
