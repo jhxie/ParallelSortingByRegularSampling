@@ -2,17 +2,26 @@
 #define SORT_H
 
 #include "macro.h"
+#include "psrs.h"
 
+#include <stdbool.h>
 #include <stddef.h>
+#include <pthread.h>
 
-struct thread_start_arg {
+struct thread_arg {
+        bool master;
+        unsigned int id;
+        pthread_t tid;
         long *head;
         size_t size;
 };
 
-int sort_launch();
+int sort_launch(const struct cli_arg *const arg);
 
 #ifdef PSRS_SORT_ONLY
+static int thread_spawn(double *average, const struct cli_arg *const arg);
+static int sequential_sort(double *average, const struct cli_arg *const arg);
+static void *parallel_sort(void *argument);
 static int long_compare(const void *left, const void *right);
 static int array_merge(long output[const],
                        long left[const],

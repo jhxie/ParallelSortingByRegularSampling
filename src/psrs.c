@@ -25,7 +25,9 @@ int main(int argc, char *argv[])
         if (0 > argument_parse(&arg, argc, argv)) {
                 err(EXIT_FAILURE, NULL);
         }
-        sort_launch(&arg);
+        if (0 > sort_launch(&arg)) {
+                err(EXIT_FAILURE, NULL);
+        }
         /*
          * According to 29.4 (chapter 29 section 4) of
          * "The Linux Programming Interface":
@@ -257,23 +259,23 @@ static void usage_show(const char *name, int status, const char *msg)
                 "%s [-h]\n"
                 "[-l LENGTH_OF_ARRAY]\n"
                 "[-r NUMBER_OF_RUNS]\n"
-                "[-t MAX_NUMBER_OF_THREADS]\n\n"
+                "[-s SEED]\n"
+                "[-t NUMBER_OF_THREADS]\n\n"
 
                 "[" ANSI_COLOR_BLUE "Optional Arguments" ANSI_COLOR_RESET "]\n"
                 "-h, --help\tshow this help message and exit\n"
                 "-l, --length\tlength of the array to be sorted\n"
                 "-r, --run\tnumber of runs\n"
-                "-t, --thread\tmaximum number of threads to launch\n"
+                "-s, --seed\tseed for PRNG of srandom()\n"
+                "-t, --thread\nnumber of threads to launch\n"
 
                 "\n[" ANSI_COLOR_BLUE "NOTE" ANSI_COLOR_RESET "]\n"
                 "1. The average is calculated based on the "
                 "number of runs specified.\n"
-                "2. The program only tests for the case(s) where "
-                "   the number of threads is a power of 2;\n"
-                "   for example, if "
-                ANSI_COLOR_MAGENTA "MAX_NUMBER_OF_THREADS" ANSI_COLOR_RESET
-                " is set to 10, then the cases where number of threads\n"
-                "   is 1, 2, 4, 8 would be tested.\n"
+                "2. To calculate the speedup relative to a\n"
+                "   single thread, remember to set the\n"
+                ANSI_COLOR_MAGENTA "SEED" ANSI_COLOR_RESET
+                "to the same value used for single thread.\n"
                 "3. "
                 ANSI_COLOR_MAGENTA "%d " ANSI_COLOR_RESET
                 "is the optimal number of threads to be chosen.\n",

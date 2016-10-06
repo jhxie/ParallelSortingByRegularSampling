@@ -4,6 +4,13 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+/*
+ * NOTE:
+ * If NULL == *array, this function would allocate memory on its behalf,
+ * which needs to be cleaned through array_destroy.
+ *
+ * If NULL != *array, this function assumes the memory region is valid.
+ */
 int array_generate(long **const array, const size_t length, unsigned int seed)
 {
         long *temp_ptr = NULL;
@@ -31,7 +38,11 @@ int array_generate(long **const array, const size_t length, unsigned int seed)
                 return -1;
         }
 
-        temp_ptr = (long *)malloc(sizeof(long) * length);
+        if (NULL == *array) {
+                temp_ptr = (long *)malloc(sizeof(long) * length);
+        } else {
+                temp_ptr = *array;
+        }
 
         if (NULL == temp_ptr) {
                 return -1;
