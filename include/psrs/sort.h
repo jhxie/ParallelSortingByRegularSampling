@@ -2,6 +2,7 @@
 #define SORT_H
 
 #include "macro.h"
+#include "list.h"
 #include "psrs.h"
 
 #include <stdbool.h>
@@ -12,8 +13,9 @@ struct thread_arg {
         bool master;
         unsigned int id;
         pthread_t tid;
-        long *head;
-        size_t size;
+        long *head; /* Starting address of the individual array. */
+        size_t size; /* Size of the individual array to be sorted. */
+        struct list *samples;
 };
 
 int sort_launch(const struct cli_arg *const arg);

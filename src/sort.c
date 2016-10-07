@@ -4,6 +4,7 @@
 #undef PSRS_SORT_ONLY
 
 #include "psrs/generator.h"
+#include "psrs/list.h"
 #include "psrs/psrs.h"
 #include "psrs/timing.h"
 
@@ -30,6 +31,15 @@ static pthread_barrier_t g_barrier;
  */
 static unsigned int g_total_threads;
 static size_t g_total_length;
+
+static size_t g_max_sample_size;
+/*
+ * Phase 1:
+ * This variable is written by multiple threads each time a sample is found;
+ * after a barrier, it is read by the master so there is no race conditions.
+ */
+static size_t g_total_samples;
+static struct list *g_pivot_list;
 
 int sort_launch(const struct cli_arg *const arg)
 {
@@ -111,8 +121,15 @@ static int thread_spawn(double *elapsed, const struct cli_arg *const arg)
                 thread_info[i].id = i;
                 thread_info[i].head = thread_info[i-1U].head +\
                                       chunk_size;
+                /* The last thread get remaining elements */
                 if (arg->thread - 1 == i) {
-                        thread_info[i].size = arg->length % chunk_size;
+                        if (0U != arg->length % chunk_size) {
+                                thread_info[i].size = arg->length % chunk_size;
+                                g_max_sample_size = arg->length % chunk_size;
+                        } else {
+                                thread_info[i].size = chunk_size;
+                                g_max_sample_size = g_total_threads;
+                        }
                 } else {
                         thread_info[i].size = chunk_size;
                 }
@@ -214,12 +231,11 @@ static void *parallel_sort(void *argument)
         struct thread_arg *arg = (struct thread_arg *)argument;
         struct timespec start;
         double *elapsed = NULL;
-        long *local_samples = NULL;
+        long *gathered_samples = NULL;
         /* w = n / p^2 */
         size_t window = g_total_length / (g_total_threads * g_total_threads);
-
-        /* Each thread picks p regular samples. */
-        local_samples = malloc(sizeof(long) * g_total_threads);
+        /* ρ (rho) = floor(p / 2) */
+        size_t pivot_step = g_total_threads / 2;
 
         /*
          * NOTE:
@@ -227,12 +243,9 @@ static void *parallel_sort(void *argument)
          * To check for sorting failures, the result obtained from PSRS
          * is compared with the one produced by sequential_sort.
          */
-        if (NULL == local_samples) {
-                return NULL;
-        }
 
         if (arg->master) {
-                elapsed = malloc(sizeof(double));
+                elapsed = (double *)malloc(sizeof(double));
                 if (NULL == elapsed) {
                         return NULL;
                 }
@@ -248,12 +261,45 @@ static void *parallel_sort(void *argument)
         /* 1.1 Sort disjoint local data. */
         qsort(arg->head, arg->size, sizeof(long), long_compare);
         /* 1.2 Begin regular sampling load balancing heuristic. */
+        list_init(&arg->samples);
+
+        for (size_t idx = 0, picked = 0;
+             idx < arg->size && picked < g_max_sample_size;
+             idx += window, ++picked) {
+                list_add(arg->samples, arg->head[idx]);
+                ++g_total_samples;
+                if (0U == window) {
+                        break;
+                }
+        }
+        /* Wait until all threads finish writing their own samples. */
         pthread_barrier_wait(&g_barrier);
 
         /* Phase 2 */
         if (arg->master) {
+                /* 2.1 Sort the collected samples. */
+                gathered_samples = (long *)malloc(sizeof(long) *\
+                                                  g_total_samples);
+                list_init(&g_pivot_list);
+                for (size_t i = 0, last = 0; i < g_total_threads; ++i) {
+                        list_copy(arg[i].samples, gathered_samples + last);
+                        last = arg[i].samples->size;
+                }
+                qsort(gathered_samples,
+                      g_total_samples,
+                      sizeof(long),
+                      long_compare);
+                /* 2.2 p - 1 pivots are selected from the regular sample. */
+                for (size_t i = g_total_threads + pivot_step, count = 0;
+                     i < g_total_samples && count < g_total_threads - 1;
+                     i += g_total_threads, ++count) {
+                        list_add(g_pivot_list, gathered_samples[i]);
+                }
+                free(gathered_samples);
+                gathered_samples = NULL;
         }
         pthread_barrier_wait(&g_barrier);
+        list_destroy(&arg->samples);
 
         /* Phase 3 */
         pthread_barrier_wait(&g_barrier);
@@ -263,9 +309,7 @@ static void *parallel_sort(void *argument)
 
         if (arg->master) {
                 timing_stop(elapsed, &start);
-        }
-
-        if (arg->master) {
+                list_destroy(&g_pivot_list);
                 return elapsed;
         } else {
                 return NULL;
