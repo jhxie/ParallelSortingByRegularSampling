@@ -13,7 +13,7 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 endif()
 
 # remember to override this variable if debug info is not needed
-set(CMAKE_BUILD_TYPE "Debug")
+set(CMAKE_BUILD_TYPE "Build")
 
 # add support for YCM
 set(CMAKE_EXPORT_COMPILE_COMMANDS "ON")

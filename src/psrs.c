@@ -272,10 +272,10 @@ static void usage_show(const char *name, int status, const char *msg)
                 "\n[" ANSI_COLOR_BLUE "NOTE" ANSI_COLOR_RESET "]\n"
                 "1. The average is calculated based on the "
                 "number of runs specified.\n"
-                "2. To calculate the speedup relative to a\n"
-                "   single thread, remember to set the\n"
+                "2. To calculate the speedup relative to a single thread,\n"
+                "   remember to set the "
                 ANSI_COLOR_MAGENTA "SEED" ANSI_COLOR_RESET
-                "to the same value used for single thread.\n"
+                " to the same value used for single thread.\n"
                 "3. "
                 ANSI_COLOR_MAGENTA "%d " ANSI_COLOR_RESET
                 "is the optimal number of threads to be chosen.\n",

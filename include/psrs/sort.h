@@ -9,6 +9,11 @@
 #include <stddef.h>
 #include <pthread.h>
 
+struct partition {
+        long *start;
+        size_t size;
+};
+
 struct thread_arg {
         bool master;
         unsigned int id;
@@ -16,6 +21,10 @@ struct thread_arg {
         long *head; /* Starting address of the individual array. */
         size_t size; /* Size of the individual array to be sorted. */
         struct list *samples;
+        struct partition *part;
+        struct partition *part_copy;
+        long *result;
+        size_t result_size;
 };
 
 int sort_launch(const struct cli_arg *const arg);

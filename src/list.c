@@ -1,7 +1,9 @@
+#include "psrs/macro.h"
 #include "psrs/list.h"
 
 #include <errno.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 int list_init(struct list **self)
 {
@@ -99,6 +101,56 @@ int list_destroy(struct list **self)
                 free(temp->head);
                 temp->head = temp_node;
         }
+        free(*self);
+        *self = NULL;
+        return 0;
+}
+
+int list_iter_init(struct list_iter **self, const struct list *long_list)
+{
+        struct list_iter *temp = NULL;
+
+        if (NULL == self || NULL == long_list) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        temp = (struct list_iter *)malloc(sizeof(struct list_iter));
+
+        if (NULL == temp) {
+                return -1;
+        }
+
+        temp->pos = long_list->head;
+
+        *self = temp;
+        return 0;
+}
+
+int list_iter_walk(struct list_iter *self, long *value)
+{
+        if (NULL == self || NULL == value) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        if (NULL == self->pos) {
+                return 0;
+        }
+
+        *value = self->pos->val;
+        self->pos = self->pos->next;
+
+        return 0;
+}
+
+int list_iter_destroy(struct list_iter **self)
+{
+        if (NULL == self) {
+                errno = EINVAL;
+                return -1;
+        }
+
         free(*self);
         *self = NULL;
         return 0;

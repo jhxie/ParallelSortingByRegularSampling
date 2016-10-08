@@ -25,6 +25,7 @@
  * parallel_sort; which can be perceived as "borrowed" by this function.
  */
 static pthread_barrier_t g_barrier;
+
 /*
  * The following two are initialized in thread_spawn function and accessed in
  * parallel_sort function as well.
@@ -32,13 +33,39 @@ static pthread_barrier_t g_barrier;
 static unsigned int g_total_threads;
 static size_t g_total_length;
 
+/*
+ * This variable is set in the thread_spawn function and read from
+ * parallel_sort function.
+ */
 static size_t g_max_sample_size;
+
 /*
  * Phase 1:
  * This variable is written by multiple threads each time a sample is found;
- * after a barrier, it is read by the master so there is no race conditions.
+ * after a barrier, it is read by the master.
+ *
+ * A mutex is needed to achieve mutual exclusion.
  */
-static size_t g_total_samples;
+static volatile size_t g_total_samples;
+
+/*
+ * NOTE:
+ * At first in the author's opinion the previous variable does not require
+ * a mutex to protect since an arithmetic addition operation is considered
+ * as an atomic operation; and even though the addition operation is not,
+ * the final result should also be the same.
+ *
+ * However, turns out the missing of a mutex for protecting against write
+ * access for the g_total_samples results in a long march of bug hunt that
+ * lasts for days as both GDB and Valgrind points to other source location for
+ * segmentation violation that does not seem to have bug after inspection.
+ */
+static pthread_mutex_t g_total_samples_mtx = PTHREAD_MUTEX_INITIALIZER;
+/*
+ * Phase 2:
+ * The selected pivots are pushed to this linked list to be shared by all the
+ * threads in the next phase.
+ */
 static struct list *g_pivot_list;
 
 int sort_launch(const struct cli_arg *const arg)
@@ -237,6 +264,13 @@ static void *parallel_sort(void *argument)
         /* ρ (rho) = floor(p / 2) */
         size_t pivot_step = g_total_threads / 2;
 
+        struct list_iter *iter = NULL;
+        long pivot = 0;
+        size_t part_idx = 0U;
+        size_t sub_idx = 0U;
+        size_t prev_part_size = 0U;
+
+        size_t part_size = 0U;
         /*
          * NOTE:
          * If any single thread fails, the final result would be wrong.
@@ -261,13 +295,23 @@ static void *parallel_sort(void *argument)
         /* 1.1 Sort disjoint local data. */
         qsort(arg->head, arg->size, sizeof(long), long_compare);
         /* 1.2 Begin regular sampling load balancing heuristic. */
-        list_init(&arg->samples);
+        if (0 > list_init(&arg->samples)) {
+                return NULL;
+        }
 
         for (size_t idx = 0, picked = 0;
              idx < arg->size && picked < g_max_sample_size;
              idx += window, ++picked) {
-                list_add(arg->samples, arg->head[idx]);
+                if (0 > list_add(arg->samples, arg->head[idx])) {
+                        return NULL;
+                }
+                if (pthread_mutex_lock(&g_total_samples_mtx)) {
+                        return NULL;
+                }
                 ++g_total_samples;
+                if (pthread_mutex_unlock(&g_total_samples_mtx)) {
+                        return NULL;
+                }
                 if (0U == window) {
                         break;
                 }
@@ -278,12 +322,19 @@ static void *parallel_sort(void *argument)
         /* Phase 2 */
         if (arg->master) {
                 /* 2.1 Sort the collected samples. */
-                gathered_samples = (long *)malloc(sizeof(long) *\
-                                                  g_total_samples);
-                list_init(&g_pivot_list);
+                /*
+                 * Use calloc instead of malloc to silence the "conditional
+                 * jump based on uninitialized heap variable" warning
+                 * coming from valgrind.
+                 */
+                gathered_samples = (long *)calloc(g_total_samples,
+                                                  sizeof(long));
+                if (0 > list_init(&g_pivot_list)) {
+                        return NULL;
+                }
                 for (size_t i = 0, last = 0; i < g_total_threads; ++i) {
                         list_copy(arg[i].samples, gathered_samples + last);
-                        last = arg[i].samples->size;
+                        last += arg[i].samples->size;
                 }
                 qsort(gathered_samples,
                       g_total_samples,
@@ -299,16 +350,68 @@ static void *parallel_sort(void *argument)
                 gathered_samples = NULL;
         }
         pthread_barrier_wait(&g_barrier);
+        /* Samples from each individual threads are no longer needed. */
         list_destroy(&arg->samples);
 
         /* Phase 3 */
+        list_iter_init(&iter, g_pivot_list);
+        arg->part = (struct partition *)calloc(g_pivot_list->size + 1U,
+                                               sizeof(struct partition));
+        arg->part[part_idx].start = arg->head;
+        while (NULL != iter->pos) {
+                list_iter_walk(iter, &pivot);
+                for (sub_idx = 0;
+                     arg->part[part_idx].start[sub_idx] <= pivot;
+                     ++sub_idx);
+                if (0 == sub_idx) {
+                        ++sub_idx;
+                }
+                arg->part[part_idx].size = sub_idx;
+                prev_part_size += sub_idx;
+                arg->part[part_idx + 1U].start = arg->part[part_idx].start +\
+                                                 arg->part[part_idx].size;
+                ++part_idx;
+        }
+        arg->part[part_idx].size = arg->size - prev_part_size;
+
         pthread_barrier_wait(&g_barrier);
+        list_iter_destroy(&iter);
 
         /* Phase 4 */
+        arg->part_copy = (struct partition *)calloc(g_pivot_list->size + 1U,
+                                                    sizeof(struct partition));
+        arg->result_size = 0U;
+        for (ssize_t i = -arg->id; i < g_total_threads - arg->id; ++i) {
+                part_size = (*(arg + i)).part[arg->id].size;
+                arg->result_size += part_size;
+                arg->part_copy[i].start = (long *)calloc(part_size,
+                                                               sizeof(long));
+                arg->part_copy[i].size = part_size;
+                memcpy(arg->part_copy[i].start,
+                       (*(arg + i)).part[arg->id].start,
+                       part_size);
+        }
         pthread_barrier_wait(&g_barrier);
+        free(arg->part);
 
         if (arg->master) {
                 timing_stop(elapsed, &start);
+                size_t test = 0;
+                for (size_t i = 0; i < g_total_threads; ++i) {
+                        for (size_t j = 0; j < g_pivot_list->size + 1U; ++j) {
+                                free(arg[i].part_copy[j].start);
+                        }
+                        free(arg[i].part_copy);
+                        test += arg[i].result_size;
+                }
+#if 0
+                /*
+                 * NOTE: The result size is completely wrong.
+                 * To be fixed.
+                 */
+                printf("Verify: %zu\n", test);
+                printf("Pivots: %zu\n", g_pivot_list->size);
+#endif
                 list_destroy(&g_pivot_list);
                 return elapsed;
         } else {
