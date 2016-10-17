@@ -36,7 +36,8 @@ a baseline for comparison:
 The *10000000* followed by the *-l* flag stands for the length of the generated
 array; the *5* that comes after *-r* stands for how many runs are required in
 order to obtain the average; the *1* followed by the *-t* flag stands for how
-many threads to be launched; the last *10* is the seed value.
+many threads to be launched; the last *10* is the seed value supplied to the
+*PRNG* of the array generation function.
 
 
 ## Speedup Comparison
@@ -48,6 +49,9 @@ python3 tools/plot.py -p build/src/psrs -o speedup.png
 ```
 The argument for *-p* flag is the path pointing to the *psrs* executable
 compiled previously; *speedup.png*  is name of the speedup graph.
+
+A sample speedup graph obtained by following the above instructions:
+![speedup](./doc/speedup.png)
 
 The result is obtained from the following input table:
 
