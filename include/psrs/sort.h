@@ -11,7 +11,7 @@
 
 struct partition {
         long *start;
-        size_t size;
+        size_t size; /* Number of elements */
 };
 
 struct thread_arg {

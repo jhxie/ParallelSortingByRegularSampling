@@ -91,6 +91,15 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
         }
 
         while (-1 != (opt = getopt_long(argc, argv, OPT_STR, OPTS, NULL))) {
+                /*
+                 * NOTE:
+                 * 'sscanf' is an unsafe function since it can cause unwanted
+                 * overflow and memory corruption, which has a negative impact
+                 * on the robustness of the program.
+                 *
+                 * Reference:
+                 * https://www.akkadia.org/drepper/defprogramming.pdf
+                 */
                 switch (opt) {
                 /*
                  * 'case 0:' only triggered when any one of the flag

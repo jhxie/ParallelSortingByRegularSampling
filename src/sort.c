@@ -125,6 +125,7 @@ static int thread_spawn(double *elapsed, const struct cli_arg *const arg)
         if (0 > array_generate(&array, arg->length, arg->seed)) {
                 return -1;
         }
+
         /*
          * According to 29.3 (chapter 29 section 3) of
          * "The Linux Programming Interface":
@@ -271,6 +272,9 @@ static void *parallel_sort(void *argument)
         size_t prev_part_size = 0U;
 
         size_t part_size = 0U;
+
+        struct partition running_result;
+        struct partition merge_dump;
         /*
          * NOTE:
          * If any single thread fails, the final result would be wrong.
@@ -319,7 +323,9 @@ static void *parallel_sort(void *argument)
         /* Wait until all threads finish writing their own samples. */
         pthread_barrier_wait(&g_barrier);
 
-        /* Phase 2 */
+        /*
+         * Phase 2 - Find Pivots then Partition.
+         */
         if (arg->master) {
                 /* 2.1 Sort the collected samples. */
                 /*
@@ -353,7 +359,13 @@ static void *parallel_sort(void *argument)
         /* Samples from each individual threads are no longer needed. */
         list_destroy(&arg->samples);
 
-        /* Phase 3 */
+        /* 2.3
+         * Each processor receives a copy of the pivots and forms p partitions
+         * from their sorted local blocks; in this case a common copy
+         * 'g_pivot_list' is used for sharing pivots; each thread keeps its own
+         * "progress information" in the 'g_pivot_list' through a 'list_iter'
+         * structure.
+         */
         list_iter_init(&iter, g_pivot_list);
         arg->part = (struct partition *)calloc(g_pivot_list->size + 1U,
                                                sizeof(struct partition));
@@ -377,40 +389,117 @@ static void *parallel_sort(void *argument)
         pthread_barrier_wait(&g_barrier);
         list_iter_destroy(&iter);
 
-        /* Phase 4 */
+        /*
+         * Phase 3 - Exchange Partitions
+         *
+         * Each processor i keeps the i-th partition for itself and assigns
+         * the j-th partition to the j-th processor.
+         *
+         * In this implementation each thread does not distinguish between
+         * partitions from others and the partition belong to itself:
+         * the 'part' member is filled by the last step of previous phase,
+         * which merely records the beginning addresses and size for each
+         * partition and no copy is involved.
+         */
         arg->part_copy = (struct partition *)calloc(g_pivot_list->size + 1U,
                                                     sizeof(struct partition));
         arg->result_size = 0U;
-        for (ssize_t i = -arg->id; i < g_total_threads - arg->id; ++i) {
+        for (ssize_t i = -(ssize_t)arg->id, j = 0;
+             i < g_total_threads - arg->id &&
+             (size_t)j < g_pivot_list->size + 1U;
+             ++i, ++j) {
                 part_size = (*(arg + i)).part[arg->id].size;
                 arg->result_size += part_size;
-                arg->part_copy[i].start = (long *)calloc(part_size,
-                                                               sizeof(long));
-                arg->part_copy[i].size = part_size;
-                memcpy(arg->part_copy[i].start,
+
+                arg->part_copy[j].start = (long *)calloc(part_size,
+                                                         sizeof(long));
+                arg->part_copy[j].size = part_size;
+                memcpy(arg->part_copy[j].start,
                        (*(arg + i)).part[arg->id].start,
                        part_size);
         }
         pthread_barrier_wait(&g_barrier);
         free(arg->part);
 
+        /*
+         * Phase 4 - Merge Partitions
+         */
+
+        /*
+         * Assume the 'g_pivot_list->size' is at least 1U.
+         * Perform a shallow copy of the 1st partition.
+         */
+        running_result = arg->part_copy[0U];
+        for (size_t i = 1U; i < g_pivot_list->size + 1U; ++i) {
+                merge_dump.size = running_result.size + arg->part_copy[i].size;
+                merge_dump.start = calloc(merge_dump.size, sizeof(long));
+                if (NULL == merge_dump.start) {
+                        return NULL;
+                }
+                array_merge(merge_dump.start,
+                            running_result.start,
+                            running_result.size,
+                            arg->part_copy[i].start,
+                            arg->part_copy[i].size);
+                free(running_result.start);
+                free(arg->part_copy[i].start);
+                running_result = merge_dump;
+        }
+        arg->result = running_result.start;
+        pthread_barrier_wait(&g_barrier);
+
+        /* 4.2 The concatenation of all the lists is the final sorted list. */
+        if (arg->master) {
+                for (size_t i = 0U, last_size = 0U; i < g_total_threads; ++i) {
+                        memcpy(arg->head + last_size,
+                               arg[i].result,
+                               arg[i].result_size);
+                        last_size += arg[i].result_size;
+                }
+        }
+        pthread_barrier_wait(&g_barrier);
+        free(arg->result);
+
+        /* End */
         if (arg->master) {
                 timing_stop(elapsed, &start);
-                size_t test = 0;
-                for (size_t i = 0; i < g_total_threads; ++i) {
-                        for (size_t j = 0; j < g_pivot_list->size + 1U; ++j) {
-                                free(arg[i].part_copy[j].start);
-                        }
+#ifdef PRINT_DEBUG_INFO
+                size_t verify_sum = 0U;
+#endif
+                for (size_t i = 0U; i < g_total_threads; ++i) {
+#ifdef PRINT_DEBUG_INFO
+                        printf("Result Size of Thread #%zu: %zu\n",
+                               i, arg[i].result_size);
+                        verify_sum += arg[i].result_size;
+#endif
                         free(arg[i].part_copy);
-                        test += arg[i].result_size;
                 }
-#if 0
                 /*
                  * NOTE: The result size is completely wrong.
                  * To be fixed.
                  */
-                printf("Verify: %zu\n", test);
+#ifdef PRINT_DEBUG_INFO
+                printf("Result Size: %zu\n", verify_sum);
                 printf("Pivots: %zu\n", g_pivot_list->size);
+                long *cmp = calloc(g_total_length, sizeof(long));
+                memcpy(cmp, arg->head, g_total_length * sizeof(long));
+                qsort(cmp, g_total_length, sizeof(long), long_compare);
+                if (0 !=
+                    memcmp(cmp, arg->head, g_total_length * sizeof(long))) {
+                        puts("The Result is Wrong!");
+
+                        puts("Correct Sorted List:");
+                        for (size_t i = 0; i < g_total_length; ++i) {
+                                printf("%ld\t", cmp[i]);
+                        }
+                        puts("");
+                        puts("Actual Sorted List:");
+                        for (size_t i = 0; i < g_total_length; ++i) {
+                                printf("%ld\t", arg->head[i]);
+                        }
+                        puts("");
+                }
+                free(cmp);
 #endif
                 list_destroy(&g_pivot_list);
                 return elapsed;
