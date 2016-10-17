@@ -34,9 +34,32 @@ a baseline for comparison:
 ./psrs -l 10000000 -r 5 -t 1 -s 10
 ```
 The *10000000* followed by the *-l* flag stands for the length of the generated
-array; the *5* that comes before *-r* stands for how many runs are required in
+array; the *5* that comes after *-r* stands for how many runs are required in
 order to obtain the average; the *1* followed by the *-t* flag stands for how
 many threads to be launched; the last *10* is the seed value.
+
+
+## Speedup Comparison
+In order to get the speedup comparison graph using both array length and number
+of threads as independent variables, run the python script resides in *tools*
+subdirectory:
+```bash
+python3 tools/plot.py -p build/src/psrs -o speedup.png
+```
+The argument for *-p* flag is the path pointing to the *psrs* executable
+compiled previously; *speedup.png*  is name of the speedup graph.
+
+The result is obtained from the following input table:
+
+| Array Size | Number of Threads |
+|:----------:|:-----------------:|
+| 2²⁰        | 1 2 4 8 16        |
+| 2²²        | 1 2 4 8 16        |
+| 2²⁴        | 1 2 4 8 16        |
+| 2²⁶        | 1 2 4 8 16        |
+| 2²⁸        | 1 2 4 8 16        |
+
+Note that speedup values are calculated based on the average of 5 runs.
 
 
 ## Credit
