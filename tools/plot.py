@@ -53,7 +53,7 @@ def speedup_plot(program: str, output: str):
     plt.xticks(thread_range)
     plt.yticks(thread_range)
     plt.xlabel("Number of Threads", fontsize="large")
-    plt.ylabel(r"Speedup ($T_1$ / $T_n$)", fontsize="large")
+    plt.ylabel(r"Speedup ($T_1$ / $T_p$)", fontsize="large")
     # The format for axis range is [xmin, xmax, ymin, ymax].
     plt.axis([0, thread_range[-1] + 2, 0, thread_range[-1] + 2])
     # The Linear Speedup Reference Line
