@@ -20,7 +20,7 @@
 
 int main(int argc, char *argv[])
 {
-        struct cli_arg arg;
+        struct cli_arg arg = { .binary = false };
 
         if (0 > argument_parse(&arg, argc, argv)) {
                 err(EXIT_FAILURE, NULL);
@@ -49,13 +49,15 @@ int main(int argc, char *argv[])
 static int argument_parse(struct cli_arg *result, int argc, char *argv[])
 {
         /* NOTE: All the flags followed by an extra colon require arguments. */
-        const static char *const OPT_STR = ":hl:r:s:t:";
+        const static char *const OPT_STR = ":bhl:r:s:t:w:";
         const static struct option OPTS[] = {
+                {"binary",   no_argument,       NULL, 'b'},
                 {"help",     no_argument,       NULL, 'h'},
                 {"length",   required_argument, NULL, 'l'},
                 {"run",      required_argument, NULL, 'r'},
                 {"seed",     required_argument, NULL, 's'},
                 {"thread",   required_argument, NULL, 't'},
+                {"window",   required_argument, NULL, 'w'},
                 {
                         .name    = NULL,
                         .has_arg = 0,
@@ -68,6 +70,7 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                 RUN,
                 SEED,
                 THREAD,
+                WINDOW,
                 NUM_OF_CMD_ARGS
         };
         bool all_arguments_present = true;
@@ -90,6 +93,9 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                 return -1;
         }
 
+        /* By default, output average value in human readable form. */
+        result->binary = false;
+
         while (-1 != (opt = getopt_long(argc, argv, OPT_STR, OPTS, NULL))) {
                 /*
                  * NOTE:
@@ -107,6 +113,9 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                  * in this program this branch is never taken.
                  */
                 case 0:
+                        break;
+                case 'b':
+                        result->binary = true;
                         break;
                 case 'l': {
                         if (0 > sizet_convert(&result->length, optarg)) {
@@ -144,6 +153,15 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                         check[THREAD] = true;
                         break;
                 }
+                case 'w': {
+                        if (0 > sizet_convert(&result->window, optarg)) {
+                                usage_show(program_name,
+                                           EXIT_FAILURE,
+                                           "Window is too large or not valid");
+                        }
+                        check[WINDOW] = true;
+                        break;
+                }
                 case '?':
                         usage_show(program_name,
                                    EXIT_FAILURE,
@@ -165,16 +183,23 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
         if (false == all_arguments_present) {
                 usage_show(program_name,
                            EXIT_FAILURE,
-                           "Length, run, seed, thread argument "
+                           "Length, run, seed, thread, window arguments "
                            "must be all supplied");
         }
 
         if (0U == result->length || 0U == result->run || \
-            0U == result->seed || 0U == result->thread) {
+            0U == result->seed || 0U == result->thread || \
+            0U == result->window) {
                 usage_show(program_name,
                            EXIT_FAILURE,
-                           "Length, run, seed, thread argument "
+                           "Length, run, seed, thread, window arguments "
                            "must be all positive");
+        }
+
+        if (result->run < result->window) {
+                usage_show(program_name,
+                           EXIT_FAILURE,
+                           "Window must be less than or equal to Run");
         }
 
         /* length can not be fit into a dynamically allocated array. */
@@ -266,21 +291,27 @@ static void usage_show(const char *name, int status, const char *msg)
         fprintf(stderr,
                 "[" ANSI_COLOR_BLUE "Usage" ANSI_COLOR_RESET "]\n"
                 "%s [-h]\n"
+                "[-b]\n"
                 "[-l LENGTH_OF_ARRAY]\n"
                 "[-r NUMBER_OF_RUNS]\n"
                 "[-s SEED]\n"
-                "[-t NUMBER_OF_THREADS]\n\n"
+                "[-t NUMBER_OF_THREADS]\n"
+                "[-w MOVING_WINDOW_SIZE]\n\n"
 
                 "[" ANSI_COLOR_BLUE "Optional Arguments" ANSI_COLOR_RESET "]\n"
-                "-h, --help\tshow this help message and exit\n"
+                "-b, --binary\tgive binary output instead of text\n"
+                "-h, --help\tshow this help message and exit\n\n"
+
+                "[" ANSI_COLOR_BLUE "Required Arguments" ANSI_COLOR_RESET "]\n"
                 "-l, --length\tlength of the array to be sorted\n"
                 "-r, --run\tnumber of runs\n"
                 "-s, --seed\tseed for PRNG of srandom()\n"
-                "-t, --thread\nnumber of threads to launch\n"
+                "-t, --thread\tnumber of threads to launch\n"
+                "-w, --window\twindow size of moving average\n"
 
                 "\n[" ANSI_COLOR_BLUE "NOTE" ANSI_COLOR_RESET "]\n"
-                "1. The average is calculated based on the "
-                "number of runs specified.\n"
+                "1. The moving average is calculated based on both number of\n"
+                "   runs and window size: window size <= number of runs\n"
                 "2. To calculate the speedup relative to a single thread,\n"
                 "   remember to set the "
                 ANSI_COLOR_MAGENTA "SEED" ANSI_COLOR_RESET

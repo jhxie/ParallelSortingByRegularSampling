@@ -4,13 +4,16 @@
 #include "macro.h"
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 struct cli_arg {
+        bool binary; /* Whether output the moving average in binary format. */
         size_t length;
         size_t run;
         unsigned int seed;
         unsigned int thread;
+        size_t window;
 };
 
 #ifdef PSRS_PSRS_ONLY

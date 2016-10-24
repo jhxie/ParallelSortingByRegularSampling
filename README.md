@@ -31,13 +31,20 @@ cd src
 For example, to obtain the running time of one thread quick sort to be used as
 a baseline for comparison:
 ```bash
-./psrs -l 10000000 -r 5 -t 1 -s 10
+./psrs -l 10000000 -r 7 -s 10 -t 1 -w 5
 ```
 The *10000000* followed by the *-l* flag stands for the length of the generated
-array; the *5* that comes after *-r* stands for how many runs are required in
-order to obtain the average; the *1* followed by the *-t* flag stands for how
-many threads to be launched; the last *10* is the seed value supplied to the
-*PRNG* of the array generation function.
+array; the *7* that comes after *-r* stands for how many runs are required in
+order to obtain the average; the *10* is the seed value supplied to the
+*PRNG* of the array generation function; the *1* followed by the *-t* flag
+stands for how many threads to be launched;  the last *5* argument for *-w*
+flag denotes the window size for calculating moving average (number of runs
+must not be less than window size; otherwise moving average can not be
+calculated).
+
+If needed, the average can be printed in binary form (double precision
+floating-point value) by giving an extra *-b* flag - this is mostly useful for
+piping the average directly into another program.
 
 
 ## Speedup Comparison
@@ -63,7 +70,8 @@ The result is obtained from the following input table:
 | 2²⁶        | 1 2 4 8 16        |
 | 2²⁸        | 1 2 4 8 16        |
 
-Note that speedup values are calculated based on the average of 5 runs.
+Note that speedup values are calculated based on the average of last 5 runs of
+the total 7.
 
 
 ## Credit

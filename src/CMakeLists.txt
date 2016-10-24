@@ -7,6 +7,10 @@
 
 add_executable(psrs
     "psrs.c" "generator.c" "list.c" "ring.c" "sort.c" "stats.c" "timing.c")
+
+if(CMAKE_BUILD_TYPE MATCHES "Debug")
+    target_compile_definitions(psrs PRIVATE  PRINT_DEBUG_INFO=1)
+endif()
 target_link_libraries(psrs ${CMAKE_THREAD_LIBS_INIT} m)
 # add_executable(main "main.c" "ring.c" "stats.c")
 

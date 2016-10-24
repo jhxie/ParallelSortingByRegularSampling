@@ -6,6 +6,7 @@
 #include "psrs/generator.h"
 #include "psrs/list.h"
 #include "psrs/psrs.h"
+#include "psrs/stats.h"
 #include "psrs/timing.h"
 
 #include <err.h>
@@ -70,31 +71,46 @@ static struct list *g_pivot_list;
 
 int sort_launch(const struct cli_arg *const arg)
 {
-        double one_thread_average = .0;
-        double n_thread_average = .0;
+        double average = .0;
         double n_thread_time = .0;
+        struct moving_window *window = NULL;
 
-        if (NULL == arg) {
+        if (NULL == arg || 0U == arg->thread) {
                 errno = EINVAL;
                 return -1;
         }
 
+        if (0 > moving_window_init(&window, arg->window)) {
+                return -1;
+        }
+
         if (1U == arg->thread) {
-                if (0 > sequential_sort(&one_thread_average, arg)) {
+                if (0 > sequential_sort(&average, arg)) {
                         return -1;
                 }
-                printf("%f\n", one_thread_average);
         } else if (1U < arg->thread) {
                 for (size_t i = 0; i < arg->run; ++i) {
                         if (0 > thread_spawn(&n_thread_time, arg)) {
                                 return -1;
                         }
-                        n_thread_average += n_thread_time;
+
+                        if (0 > moving_window_push(window, n_thread_time)) {
+                                return -1;
+                        }
                 }
-                n_thread_average /= (double)arg->run;
-                printf("%f\n", n_thread_average);
+
+                if (0 > moving_average_calc(window, &average)) {
+                        return -1;
+                }
         }
 
+        if (arg->binary) {
+                fwrite(&average, sizeof(average), 1U, stdout);
+        } else {
+                printf("%f\n", average);
+        }
+
+        moving_window_destroy(&window);
         return 0;
 }
 
@@ -193,9 +209,14 @@ static int sequential_sort(double *average, const struct cli_arg *const arg)
         double elapsed = .0, one_thread_average = .0;
         long *array = NULL;
         struct timespec start;
+        struct moving_window *window = NULL;
 
         if (NULL == average || NULL == arg) {
                 errno = EINVAL;
+                return -1;
+        }
+
+        if (0 > moving_window_init(&window, arg->window)) {
                 return -1;
         }
 
@@ -208,7 +229,7 @@ static int sequential_sort(double *average, const struct cli_arg *const arg)
          * If the number of threads needs to be executed is 1, pthread APIs
          * need not to be invoked.
          */
-        for (size_t iteration = 0; iteration < arg->run; ++iteration) {
+        for (size_t iteration = 0U; iteration < arg->run; ++iteration) {
                 timing_start(&start);
                 qsort(array, arg->length, sizeof(long), long_compare);
                 timing_stop(&elapsed, &start);
@@ -220,12 +241,16 @@ static int sequential_sort(double *average, const struct cli_arg *const arg)
                 if (0 > array_generate(&array, arg->length, arg->seed)) {
                         return -1;
                 }
-                one_thread_average += elapsed;
+                moving_window_push(window, elapsed);
                 elapsed = .0;
         }
-        one_thread_average /= (double)arg->run;
+
+        if (0 > moving_average_calc(window, &one_thread_average)) {
+                return -1;
+        }
 
         array_destroy(&array);
+        moving_window_destroy(&window);
 
         *average = one_thread_average;
         return 0;
@@ -487,7 +512,9 @@ static void *parallel_sort(void *argument)
                 if (0 !=
                     memcmp(cmp, arg->head, g_total_length * sizeof(long))) {
                         puts("The Result is Wrong!");
+                        puts("------------------------------");
 
+#if 0
                         puts("Correct Sorted List:");
                         for (size_t i = 0; i < g_total_length; ++i) {
                                 printf("%ld\t", cmp[i]);
@@ -498,6 +525,7 @@ static void *parallel_sort(void *argument)
                                 printf("%ld\t", arg->head[i]);
                         }
                         puts("");
+#endif
                 }
                 free(cmp);
 #endif

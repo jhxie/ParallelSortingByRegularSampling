@@ -114,7 +114,7 @@ int moving_average_calc(const struct moving_window *window, double *average)
                 result += *current;
         }
 
-        result /= window_size;
+        result /= (double)window_size;
 
         /* 'iter' can not be NULL; return value unchecked. */
         ring_iter_destroy(&iter);
