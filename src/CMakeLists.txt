@@ -8,6 +8,7 @@
 add_executable(psrs
     "psrs.c" "generator.c" "list.c" "ring.c" "sort.c" "stats.c" "timing.c")
 target_link_libraries(psrs ${CMAKE_THREAD_LIBS_INIT} m)
+# add_executable(main "main.c" "ring.c" "stats.c")
 
 # target_link_libraries(timestamp ${CMAKE_THREAD_LIBS_INIT})
 # install(TARGETS main
