@@ -13,7 +13,12 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 endif()
 
 # remember to override this variable if debug info is not needed
-set(CMAKE_BUILD_TYPE "Debug")
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
+        "Choose the type of build, options are:
+        None Debug Release RelWithDebInfo MinSizeRel."
+        FORCE)
+endif()
 
 # add support for YCM
 set(CMAKE_EXPORT_COMPILE_COMMANDS "ON")

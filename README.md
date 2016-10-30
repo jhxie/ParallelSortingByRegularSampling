@@ -18,9 +18,12 @@ sudo apt-get install build-essential cmake cmake-extras extra-cmake-modules pyth
 Change working directory to where the source directory resides and then issue:
 ```bash
 mkdir build && cd build
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
+Note the **"CMAKE_BUILD_TYPE=Release"** cache entry definition is necessary
+if debug information is not needed (necessary for the
+[plot.py](./tools/plot.py) script to work properly).
 
 ## Getting Started
 To get usage help from the compiled program obtained from the last section:

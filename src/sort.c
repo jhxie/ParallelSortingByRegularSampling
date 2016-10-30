@@ -441,7 +441,7 @@ static void *parallel_sort(void *argument)
                 arg->part_copy[j].size = part_size;
                 memcpy(arg->part_copy[j].start,
                        (*(arg + i)).part[arg->id].start,
-                       part_size);
+                       part_size * sizeof(long));
         }
         pthread_barrier_wait(&g_barrier);
         free(arg->part);
@@ -478,7 +478,7 @@ static void *parallel_sort(void *argument)
                 for (size_t i = 0U, last_size = 0U; i < g_total_threads; ++i) {
                         memcpy(arg->head + last_size,
                                arg[i].result,
-                               arg[i].result_size);
+                               arg[i].result_size * sizeof(long));
                         last_size += arg[i].result_size;
                 }
         }
