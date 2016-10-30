@@ -55,10 +55,11 @@ In order to get the speedup comparison graph using both array length and number
 of threads as independent variables, run the python script resides in *tools*
 subdirectory:
 ```bash
-python3 tools/plot.py -p build/src/psrs -o speedup.png
+python3 tools/plot.py -p build/src/psrs -s speedup.png -t runtime.png
 ```
 The argument for *-p* flag is the path pointing to the *psrs* executable
-compiled previously; *speedup.png*  is name of the speedup graph.
+compiled previously; *speedup.png*  is name of the speedup graph, *runtime.png*
+is the name of the summary table for actual runtime.
 
 A sample speedup graph obtained by following the above instructions:
 ![speedup](./doc/speedup.png)
@@ -72,6 +73,9 @@ The result is obtained from the following input table:
 | 2²⁴        | 1 2 4 8 16        |
 | 2²⁶        | 1 2 4 8 16        |
 | 2²⁸        | 1 2 4 8 16        |
+
+The actual runtime is recorded in the following table:
+![runtime](./doc/runtime.png)
 
 Note that speedup values are calculated based on the average of last 5 runs of
 the total 7.

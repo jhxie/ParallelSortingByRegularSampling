@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
 """
-Generates speed-up graphs for the PSRS program.
+Generates a speed-up graph and a summary table of running time for
+the PSRS program.
 """
 
 # ------------------------------- MODULE INFO ---------------------------------
-__all__ = ["speedup_plot"]
+__all__ = ["speedup_plot", "runtime_tabulate"]
 # ------------------------------- MODULE INFO ---------------------------------
 
 # --------------------------------- MODULES -----------------------------------
@@ -14,18 +15,32 @@ import math
 import matplotlib
 import matplotlib.pyplot as plt
 import os
+import random
 import shutil
 import struct
 import subprocess
+
+from typing import Dict, List, Tuple
 # --------------------------------- MODULES -----------------------------------
+
+# ------------------------------ TYPE ALIASES ---------------------------------
+# The 'runtime_dict' returned by 'speedup_plot' is a 'dict' with keys
+# of the following form:
+RunTimeKey = Tuple[int, Tuple[int]]
+# an example entry in the 'runtime_dict' would be
+# (1024, (1, 2, 4, 8, 16)): [0.5, 0.4, 0.3, 0.2, 0.1]
+# which denotes:
+# (number of keys sorted, (number of threads used as tests)): [actual runtime]
+# ------------------------------ TYPE ALIASES ---------------------------------
 
 
 # -------------------------------- FUNCTIONS ----------------------------------
-def speedup_plot(program: str, output: str):
+def speedup_plot(program: str, output: str) -> Dict[RunTimeKey, List[float]]:
     """
     Plots the speedup graph based on the given 'program' that implements the
     Parallel Sorting by Regular Sampling algorithm and saves the graph as
-    'output'.
+    'output', also returns a 'dict' containing actual runtimes in the form
+    described in 'TYPE ALIASES' section.
 
     NOTE:
     The PSRS program must support a command line interface of the following:
@@ -45,17 +60,20 @@ def speedup_plot(program: str, output: str):
     average_time = None
     program += " -b -l {length} -r {run} -s {seed} -t {thread} -w {window}"
     argument_dict = dict(run=7, seed=10, window=5)
-    thread_range = [2 ** e for e in range(5)]
-    # length_range = [2 ** e for e in range(20, 29, 2)]
-    length_range = [2 ** e for e in range(15, 24, 2)]
-    legend_range = ["o", "s", "^", "d", "*"]
-    color_range = ["g", "b", "y", "m", "r"]
-    speedup = list()
+    thread_range = tuple(2 ** e for e in range(5))
+    length_range = tuple(2 ** e for e in range(20, 29, 2))
+    # length_range = tuple(2 ** e for e in range(10, 19, 2))
+    legend_range = ("o", "s", "^", "d", "*")
+    color_range = ("g", "b", "y", "m", "r")
+    runtime_keys = [(length, thread_range) for length in length_range]
+    runtime_dict = {runtime_key: list() for runtime_key in runtime_keys}
+    speedup_vector = list()
     extension = os.path.splitext(output)[-1]
 
     if not extension:
         raise ValueError("The output must have a valid file extension")
 
+    plt.title("Speedup Graph")
     plt.xticks(thread_range)
     plt.yticks(thread_range)
     plt.xlabel("Number of Threads", fontsize="large")
@@ -69,7 +87,7 @@ def speedup_plot(program: str, output: str):
 
     for length, legend, color in zip(length_range, legend_range, color_range):
         argument_dict["length"] = length
-        speedup.clear()
+        speedup_vector.clear()
         for thread_count in thread_range:
             argument_dict["thread"] = thread_count
             command = program.format(**argument_dict).split(" ")
@@ -90,21 +108,68 @@ def speedup_plot(program: str, output: str):
                 average_time = struct.unpack("@d", proc.communicate()[0])[0]
             if 1 != thread_count:
                 # Speedup = T1 / Tp
-                average_time = speedup[0] / average_time
-            speedup.append(average_time)
+                speedup = speedup_vector[0] / average_time
+            else:
+                speedup = average_time
+            speedup_vector.append(speedup)
+            runtime_dict[(length, thread_range)].append(average_time)
 
         # The speedup for the 1 thread case is always 1
-        speedup[0] /= speedup[0]
-        plt.plot(thread_range, speedup,
+        # set outside the inner loop because all the speedup values in
+        # the 'speedup_vector' need to be calculated based on the T1
+        speedup_vector[0] = 1.0
+        plt.plot(thread_range, speedup_vector,
                  color=color, label=_log2_exponent_get(length), linestyle="--",
                  marker=legend, markersize=10)
 
     plt.legend(loc="best", title="Length")
     plt.savefig(output)
+    plt.clf()
+    return runtime_dict
+
+
+def runtime_tabulate(runtime: Dict[RunTimeKey, List[float]], output: str):
+    """
+
+    NOTE: Assumes all the values in 'runtime' is of same length; so there
+    are same number of threads tested for each length.
+    """
+    if not (isinstance(runtime, dict) and isinstance(output, str)):
+        raise TypeError("'runtime' and 'output' need to be of 'dict', 'str'"
+                        " types, respectively")
+
+    length_range = [float(key[0]) for key in sorted(runtime.keys())]
+    length_label = [_log2_exponent_get(length) for length in length_range]
+    thread_range = random.choice(list(runtime.keys()))[-1]
+    thread_label = list()
+    runtime_matrix = [runtime[key] for key in sorted(runtime.keys())]
+    runtime_format = [["{0:f}".format(j) for j in i] for i in runtime_matrix]
+
+    for thread in thread_range:
+        label = "{0} Thread{1}".format(thread, "" if 1 == thread else "s")
+        thread_label.append(label)
+
+    # plt.axis("tight")
+    plt.axis("off")
+    plt.title("Running Time in Moving Average (second)")
+    table = plt.table(cellText=runtime_format,
+                      rowLabels=length_label,
+                      colLabels=thread_label,
+                      loc="center")
+    # table.set_fontsize("large")
+    # table.scale(1.2, 1.2)
+    table.scale(1, 4.5)
+    # figure = plt.gcf()
+    # figure.set_size_inches(10, 6)
+    plt.savefig(output)
+    plt.clf()
 
 
 def _log2_exponent_get(number: float) -> str:
     """
+    Returns a specially formatted string of the result log2(number).
+
+    NOTE: The result log2(number) must be an integer.
     """
     result = math.log2(number)
 
@@ -121,22 +186,25 @@ def main():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p",
-                        "--program",
-                        type=str,
-                        required=False,
-                        help="path to the PSRS executable")
-    parser.add_argument("-o",
-                        "--output",
-                        type=str,
-                        required=False,
-                        help="file name of the speed-up program")
+    attr_desc_dict = {
+        "program": "path to the PSRS executable",
+        "speedup": "file name of the speed-up program",
+        "table": "file name of the running time summary table"
+    }
+
+    for flag, msg in attr_desc_dict.items():
+        parser.add_argument("-" + flag[0],
+                            "--" + flag,
+                            type=str,
+                            required=False,
+                            help=msg)
     args = parser.parse_args()
 
-    if args.program and args.output:
+    if all(getattr(args, attr) for attr in attr_desc_dict):
         matplotlib.rc('font',
                       **{'sans-serif': 'Arial', 'family': 'sans-serif'})
-        speedup_plot(args.program, args.output)
+        runtime_dict = speedup_plot(args.program, args.speedup)
+        runtime_tabulate(runtime_dict, args.table)
 # -------------------------------- FUNCTIONS ----------------------------------
 
 
