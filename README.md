@@ -77,8 +77,9 @@ The result is obtained from the following input table:
 The actual runtime is recorded in the following table:
 ![runtime](./doc/runtime.png)
 
-Note that speedup values are calculated based on the average of last 5 runs of
-the total 7.
+Note that speedup values are calculated based on a collection of moving-average
+runtimes with window size of 5 and 7 runs in total, which are the runtime
+values shown in the above table.
 
 
 ## Credit
