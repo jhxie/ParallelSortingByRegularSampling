@@ -6,7 +6,7 @@ the PSRS program.
 """
 
 # ------------------------------- MODULE INFO ---------------------------------
-__all__ = ["speedup_plot", "runtime_tabulate"]
+__all__ = ["speedup_plot", "runtime_tabulate", "runtime_plot"]
 # ------------------------------- MODULE INFO ---------------------------------
 
 # --------------------------------- MODULES -----------------------------------
@@ -20,6 +20,8 @@ import shutil
 import struct
 import subprocess
 
+# Note 'Axes3d' is used implicitly by matplotlib
+from mpl_toolkits.mplot3d import Axes3D
 from typing import Dict, List, Tuple
 # --------------------------------- MODULES -----------------------------------
 
@@ -90,7 +92,7 @@ def speedup_plot(program: str, output: str) -> Dict[RunTimeKey, List[float]]:
         speedup_vector.clear()
         for thread_count in thread_range:
             argument_dict["thread"] = thread_count
-            command = program.format(**argument_dict).split(" ")
+            command = program.format(**argument_dict).split()
             # Let 'psrs' program write the moving average in binary form,
             # rather than the human-readable text form, because 'printf' cannot
             # print exact values of floating-point numbers that easily.
@@ -130,6 +132,8 @@ def speedup_plot(program: str, output: str) -> Dict[RunTimeKey, List[float]]:
 
 def runtime_tabulate(runtime: Dict[RunTimeKey, List[float]], output: str):
     """
+    Tabulates the 'runtime' with number of threads as x axis (row) and length
+    of array as y axis (column).
 
     NOTE: Assumes all the values in 'runtime' is of same length; so there
     are same number of threads tested for each length.
@@ -139,28 +143,75 @@ def runtime_tabulate(runtime: Dict[RunTimeKey, List[float]], output: str):
                         " types, respectively")
 
     length_range = [float(key[0]) for key in sorted(runtime.keys())]
-    length_label = [_log2_exponent_get(length) for length in length_range]
+    length_labels = [_log2_exponent_get(length) for length in length_range]
     thread_range = random.choice(list(runtime.keys()))[-1]
-    thread_label = list()
+    thread_labels = list()
     runtime_matrix = [runtime[key] for key in sorted(runtime.keys())]
     runtime_format = [["{0:f}".format(j) for j in i] for i in runtime_matrix]
 
     for thread in thread_range:
         label = "{0} Thread{1}".format(thread, "" if 1 == thread else "s")
-        thread_label.append(label)
+        thread_labels.append(label)
 
     # plt.axis("tight")
     plt.axis("off")
     plt.title("Running Time in Moving Average (second)")
     table = plt.table(cellText=runtime_format,
-                      rowLabels=length_label,
-                      colLabels=thread_label,
+                      rowLabels=length_labels,
+                      colLabels=thread_labels,
                       loc="center")
     # table.set_fontsize("large")
     # table.scale(1.2, 1.2)
     table.scale(1, 4.5)
     # figure = plt.gcf()
     # figure.set_size_inches(10, 6)
+    plt.savefig(output)
+    plt.clf()
+
+
+def runtime_plot(runtime: Dict[RunTimeKey, List[float]], output: str):
+    """
+    Plots the runtime using a 3-D bar chart with number of threads and length
+    of array as categorical variables.
+    """
+    if not (isinstance(runtime, dict) and isinstance(output, str)):
+        raise TypeError("'runtime' and 'output' need to be of 'dict', 'str'"
+                        " types, respectively")
+
+    color_range = ("g", "b", "y", "m", "r")
+    length_range = [float(key[0]) for key in sorted(runtime.keys())]
+    length_labels = [_log2_exponent_get(length) for length in length_range]
+    # Make each group (in terms of length of array in this case) evenly spaced
+    length_arrange = [i for i in range(len(length_range))]
+    thread_range = random.choice(list(runtime.keys()))[-1]
+    thread_labels = [str(i) for i in thread_range]
+    # Make each group (in terms of number of threads) evenly spaced
+    thread_arrange = [i for i in range(len(thread_range))]
+    runtime_matrix = [runtime[key] for key in sorted(runtime.keys())]
+    extension = os.path.splitext(output)[-1]
+    iterate = zip(runtime_matrix, length_arrange, length_labels, color_range)
+
+    if not extension:
+        raise ValueError("The 'output' must have a valid file extension")
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_xlabel("Number of Threads")
+    ax.set_ylabel("Length of Array")
+    ax.set_zlabel("Running Time")
+    plt.title("Running Time Per Group")
+    plt.xticks(thread_arrange, thread_labels)
+    plt.yticks(length_arrange, length_labels)
+
+    for vector, length, label, color in iterate:
+        ax.bar(thread_arrange,
+               vector,
+               zs=length,
+               zdir="y",
+               color=color,
+               alpha=0.5)
+
+    # fig.set_size_inches(10, 6)
     plt.savefig(output)
     plt.clf()
 
@@ -182,14 +233,15 @@ def _log2_exponent_get(number: float) -> str:
 
 def main():
     """
-    Command line driver for the 'speedup_plot' function.
+    Main command line driver.
     """
 
     parser = argparse.ArgumentParser()
     attr_desc_dict = {
         "program": "path to the PSRS executable",
         "speedup": "file name of the speed-up program",
-        "table": "file name of the running time summary table"
+        "table": "file name of the running time summary table",
+        "runtime": "3-d bar chart of the running time summary"
     }
 
     for flag, msg in attr_desc_dict.items():
@@ -205,6 +257,7 @@ def main():
                       **{'sans-serif': 'Arial', 'family': 'sans-serif'})
         runtime_dict = speedup_plot(args.program, args.speedup)
         runtime_tabulate(runtime_dict, args.table)
+        runtime_plot(runtime_dict, args.runtime)
 # -------------------------------- FUNCTIONS ----------------------------------
 
 

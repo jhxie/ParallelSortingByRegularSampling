@@ -75,6 +75,9 @@ The result is obtained from the following input table:
 | 2²⁸        | 1 2 4 8 16        |
 
 The actual runtime is recorded in the following table:
+![table](./doc/table.png)
+
+And a corresponding bar chart:
 ![runtime](./doc/runtime.png)
 
 Note that speedup values are calculated based on a collection of moving-average
