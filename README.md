@@ -55,11 +55,16 @@ In order to get the speedup comparison graph using both array length and number
 of threads as independent variables, run the python script resides in *tools*
 subdirectory:
 ```bash
-python3 tools/plot.py -p build/src/psrs -s speedup.png -t runtime.png
+python3 tools/plot.py -p build/src/psrs -s speedup.png -t table.png -r runtime.png
 ```
 The argument for *-p* flag is the path pointing to the *psrs* executable
-compiled previously; *speedup.png*  is name of the speedup graph, *runtime.png*
-is the name of the summary table for actual runtime.
+compiled previously; *speedup.png*  is name of the speedup graph, *table.png*
+is the name of the summary table for actual runtime; *runtime.png* is the name
+of the bar chart visualization for comparing runtime grouped by array length.
+
+Note that speedup ratios are calculated based on a collection of moving-average
+runtimes with window size of 5 and 7 runs in total, which are the runtime
+values shown in the figure ("Running Time in Moving Average") below.
 
 A sample speedup graph obtained by following the above instructions:
 ![speedup](./doc/speedup.png)
@@ -77,12 +82,8 @@ The result is obtained from the following input table:
 The actual runtime is recorded in the following table:
 ![table](./doc/table.png)
 
-And a corresponding bar chart:
+And a corresponding comparison bar chart:
 ![runtime](./doc/runtime.png)
-
-Note that speedup values are calculated based on a collection of moving-average
-runtimes with window size of 5 and 7 runs in total, which are the runtime
-values shown in the above table.
 
 
 ## Credit
