@@ -7,30 +7,28 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <pthread.h>
 
 struct partition {
         long *start;
-        size_t size; /* Number of elements */
+        int size; /* Number of elements */
 };
 
-struct thread_arg {
-        bool master;
-        unsigned int id;
-        pthread_t tid;
+struct process_arg {
+        unsigned int root;
+        int id;
         long *head; /* Starting address of the individual array. */
-        size_t size; /* Size of the individual array to be sorted. */
+        int size; /* Size of the individual array to be sorted. */
         struct list *samples;
         struct partition *part;
         struct partition *part_copy;
         long *result;
-        size_t result_size;
+        int result_size;
 };
 
-int sort_launch(const struct cli_arg *const arg);
+void sort_launch(const struct cli_arg *const arg);
 
 #ifdef PSRS_SORT_ONLY
-static int thread_spawn(double *average, const struct cli_arg *const arg);
+static void psort_launch(double *elapsed, const struct cli_arg *const arg);
 static int sequential_sort(double *average, const struct cli_arg *const arg);
 static void *parallel_sort(void *argument);
 static int long_compare(const void *left, const void *right);

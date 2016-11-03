@@ -1,17 +1,17 @@
 ## Overview
-Pthread-based program that implements the parallel sorting by regular sampling
+MPI-based program that implements the parallel sorting by regular sampling
 algorithm.
 
 ## Dependency
 * C Compiler with ISO C99 Support (GCC **4.3+**).
 * [CMake](https://cmake.org/) build system (**3.5+**).
-* POSIX-Threading library with POSIX.1-2008 Support.
-* [Python](https://www.python.org/) interpreter (**3.5+**).
 * [Matplotlib](http://matplotlib.org/) plotting library.
+* [MPICH](http://www.mpich.org/) message passing library (**3.2+**).
+* [Python](https://www.python.org/) interpreter (**3.5+**).
 
 **Ubuntu** (>= 16.04)  
 ```bash
-sudo apt-get install build-essential cmake cmake-extras extra-cmake-modules python3-matplotlib
+sudo apt-get install build-essential cmake cmake-extras extra-cmake-modules libmpich-dev mpich python3-matplotlib
 ```
 
 ## Build Instructions

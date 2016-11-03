@@ -48,17 +48,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # that we can include cmake files from this directory
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
-# test the existence of pthread run-time on the system
-find_package(Threads REQUIRED)
-if(NOT CMAKE_THREAD_LIBS_INIT)
-    message(FATAL_ERROR "Pthread must be supported on the system!")
-else()
-    # for systems that have multiple thread libraries support,
-    # select pthread as the preferred implementation to link to
-    if(NOT CMAKE_USE_PTHREADS_INIT)
-        set(CMAKE_THREAD_PREFER_PTHREAD ON)
-    endif()
-endif()
+# test the existence of MPI run-time on the system
+find_package(MPI REQUIRED)
 
 # test the existence of python 3 interpreter
 set(Python_ADDITIONAL_VERSIONS 3.5)
@@ -76,6 +67,7 @@ endif()
 # relative root directory of this project
 include_directories(
     ${PROJECT_SOURCE_DIR}/include
+    ${MPI_C_INCLUDE_PATH}
 )
 
 add_subdirectory(src)

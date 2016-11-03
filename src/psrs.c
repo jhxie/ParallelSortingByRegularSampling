@@ -3,10 +3,9 @@
 #include "psrs/psrs.h"
 #undef PSRS_PSRS_ONLY
 
+#include "psrs/convert.h"
 #include "psrs/sort.h"
-#include "psrs/timing.h"
 
-#include <err.h>
 #include <errno.h>
 #include <getopt.h>      /* getopt_long() */
 #include <inttypes.h>    /* uintmax_t */
@@ -20,29 +19,93 @@
 
 int main(int argc, char *argv[])
 {
+        /*
+         * According to the manual page of MPI:
+         * "
+         * All MPI routines (except MPI_Wtime and MPI_Wtick ) return an error
+         * value; C routines as the value of the function and Fortran routines
+         * in the last argument.
+         * Before the value is returned, the current MPI error handler is
+         * called.
+         * By default, this error handler aborts the MPI job.
+         * "
+         * For simplicity (incompetence of the author), this implementation
+         * does not change the default behavior of error handler.
+         *
+         * From 3.11 (Chapter 3 section 11) of
+         * Using MPI:
+         * Portable Parallel Programming with the Message-Passing Interface
+         * "
+         * The arguments to MPI_Init in C are &argc and &argv.
+         * This feature allows the MPI implementation to fill these in on all
+         * processes, but the MPI standard does not require it.
+         * Some implementaions propagate argc and argv to all processes;
+         * some don't.
+         * "
+         * For portability only the root process calls the argument_parse
+         * function and passes the parsed results to all the rest process(es).
+         */
+        MPI_Init(&argc, &argv);
+        int rank;
         struct cli_arg arg = { .binary = false };
 
-        if (0 > argument_parse(&arg, argc, argv)) {
-                err(EXIT_FAILURE, NULL);
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+        if (0 == rank) {
+                if (0 > argument_parse(&arg, argc, argv)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
         }
-        if (0 > sort_launch(&arg)) {
-                err(EXIT_FAILURE, NULL);
-        }
+
+        /* MPI would not deadlock even if there is only one process. */
+        argument_bcast(&arg);
+        /* All the processes receive a copy of 'arg' at this point. */
+
         /*
-         * According to 29.4 (chapter 29 section 4) of
-         * "The Linux Programming Interface":
-         *
-         * Any of the threads calls exit(), or the main thread performs a
-         * return (in the main() function), which causes all threads in the
-         * process to terminate immediately.
-         *
-         * If the main thread calls pthread_exit() instead of calling exit()
-         * or performing a return , then the other threads continue to execute.
+         * DEBUG:
+         * Check whether all the arguments are passed properly.
          */
-#if 0
-        printf("-l %zu -r %zu -s %u -t %u\n",
-               arg.length, arg.run, arg.seed, arg.thread);
+#ifdef PRINT_DEBUG_INFO
+        for (int i = 0; i < arg.process; ++i) {
+                if (rank == i) {
+                        printf("Process #%d\n", rank);
+                        printf("Binary: %u\n"
+                               "Length: %d\n"
+                               "Run: %u\n"
+                               "Seed: %u\n"
+                               "Process: %d\n"
+                               "Window: %u\n",
+                               arg.binary,
+                               arg.length,
+                               arg.run,
+                               arg.seed,
+                               arg.process,
+                               arg.window);
+                        puts("-----------------------");
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
 #endif
+        sort_launch(&arg);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Finalize();
+        /*
+         * From 3.11 (Chapter 3 section 11) of
+         * Using MPI:
+         * Portable Parallel Programming with the Message-Passing Interface
+         * "
+         * The MPI standard guarantees that at least the process with rank zero
+         * in MPI_COMM_WORLD will continue executing after MPI_Finalize
+         * returns.
+         * This permits an application to perform any non-MPI cleanup and, in a
+         * POSIX environment, provide an exit code for the program.
+         * If you use this feature, make sure to test that the process is the
+         * one with rank zero in MPI_COMM_WORLD - after MPI_Finalize, it's
+         * possible that all MPI processes are still running.
+         * "
+         * In this case no extra cleanup is required, so an exit code is
+         * supplied directly.
+         */
         return EXIT_SUCCESS;
 }
 
@@ -56,7 +119,6 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                 {"length",   required_argument, NULL, 'l'},
                 {"run",      required_argument, NULL, 'r'},
                 {"seed",     required_argument, NULL, 's'},
-                {"thread",   required_argument, NULL, 't'},
                 {"window",   required_argument, NULL, 'w'},
                 {
                         .name    = NULL,
@@ -69,7 +131,6 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                 LENGTH,
                 RUN,
                 SEED,
-                THREAD,
                 WINDOW,
                 NUM_OF_CMD_ARGS
         };
@@ -118,7 +179,7 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                         result->binary = true;
                         break;
                 case 'l': {
-                        if (0 > sizet_convert(&result->length, optarg)) {
+                        if (0 > int_convert(&result->length, optarg)) {
                                 usage_show(program_name,
                                            EXIT_FAILURE,
                                            "Length is too large or not valid");
@@ -127,7 +188,7 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                         break;
                 }
                 case 'r': {
-                        if (0 > sizet_convert(&result->run, optarg)) {
+                        if (0 > unsigned_convert(&result->run, optarg)) {
                                 usage_show(program_name,
                                            EXIT_FAILURE,
                                            "Run is too large or not valid");
@@ -144,17 +205,8 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                         check[SEED] = true;
                         break;
                 }
-                case 't': {
-                        if (0 > unsigned_convert(&result->thread, optarg)) {
-                                usage_show(program_name,
-                                           EXIT_FAILURE,
-                                           "Thread is too large or not valid");
-                        }
-                        check[THREAD] = true;
-                        break;
-                }
                 case 'w': {
-                        if (0 > sizet_convert(&result->window, optarg)) {
+                        if (0 > unsigned_convert(&result->window, optarg)) {
                                 usage_show(program_name,
                                            EXIT_FAILURE,
                                            "Window is too large or not valid");
@@ -183,16 +235,15 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
         if (false == all_arguments_present) {
                 usage_show(program_name,
                            EXIT_FAILURE,
-                           "Length, run, seed, thread, window arguments "
+                           "Length, run, seed, window arguments "
                            "must be all supplied");
         }
 
-        if (0U == result->length || 0U == result->run || \
-            0U == result->seed || 0U == result->thread || \
-            0U == result->window) {
+        if (0 >= result->length || 0U == result->run || \
+            0U == result->seed || 0U == result->window) {
                 usage_show(program_name,
                            EXIT_FAILURE,
-                           "Length, run, seed, thread, window arguments "
+                           "Length, run, seed, window arguments "
                            "must be all positive");
         }
 
@@ -203,81 +254,36 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
         }
 
         /* length can not be fit into a dynamically allocated array. */
-        if ((SIZE_MAX / sizeof(long)) < result->length) {
+        if ((SIZE_MAX / sizeof(long)) < (size_t)result->length) {
                 usage_show(program_name,
                            EXIT_FAILURE,
                            "Length is larger than (SIZE_MAX / sizeof(long))");
         }
         free(program_name);
+
+        MPI_Comm_size(MPI_COMM_WORLD, &(result->process));
         return 0;
 }
 
-static int sizet_convert(size_t *size, const char *const candidate)
+static void argument_bcast(struct cli_arg *arg)
 {
-        char *endptr = NULL;
-        errno = 0;
-        size_t temp = 0U;
-        uintmax_t result = strtoumax(candidate, &endptr, 10);
-
-        /* Check overflow */
-        if (UINTMAX_MAX == result && ERANGE == errno) {
-                return -1;
         /*
-         * From the manual page of strtoumax(),
-         * "
-         * if there were no digits at all, strtoumax() stores the original
-         * value of nptr in endptr (and returns 0)
-         * "
-         * so an argument with some numbers mixed-in would work in this case.
-         */
-        } else if (0U == result && endptr == candidate) {
-                return -1;
-        }
-
-        temp = (size_t)result;
-
-        if ((uintmax_t)temp == result) {
-                *size = temp;
-        } else {
-                errno = ERANGE;
-                return -1;
-        }
-
-        return 0;
-}
-
-static int unsigned_convert(unsigned int *number, const char *const candidate)
-{
-        char *endptr = NULL;
-        errno = 0;
-        unsigned int temp = 0U;
-        unsigned long result = strtoul(candidate, &endptr, 10);
-
-        /* Check overflow */
-        if (UINTMAX_MAX == result && ERANGE == errno) {
-                return -1;
-        /*
-         * From the manual page of strtoul(),
-         * "
-         * if there were no digits at all, strtoul() stores the original value
-         * of nptr in endptr (and returns 0)
-         * "
-         * so an argument with some numbers mixed-in would work in this case.
-         */
-        } else if (0U == result && endptr == candidate) {
-                return -1;
-        }
-
-        temp = (unsigned int)result;
-
-        if ((unsigned long)temp == result) {
-                *number = temp;
-        } else {
-                errno = ERANGE;
-                return -1;
-        }
-
-        return 0;
+         * Depends on how the processes are actually scheduled,
+         * the first barrier is mainly waiting for root process.
+         * */
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->binary), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->length), 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->run), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->seed), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->process), 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->window), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
 }
 
 static void usage_show(const char *name, int status, const char *msg)
@@ -295,7 +301,6 @@ static void usage_show(const char *name, int status, const char *msg)
                 "[-l LENGTH_OF_ARRAY]\n"
                 "[-r NUMBER_OF_RUNS]\n"
                 "[-s SEED]\n"
-                "[-t NUMBER_OF_THREADS]\n"
                 "[-w MOVING_WINDOW_SIZE]\n\n"
 
                 "[" ANSI_COLOR_BLUE "Optional Arguments" ANSI_COLOR_RESET "]\n"
@@ -306,19 +311,18 @@ static void usage_show(const char *name, int status, const char *msg)
                 "-l, --length\tlength of the array to be sorted\n"
                 "-r, --run\tnumber of runs\n"
                 "-s, --seed\tseed for PRNG of srandom()\n"
-                "-t, --thread\tnumber of threads to launch\n"
                 "-w, --window\twindow size of moving average\n"
 
                 "\n[" ANSI_COLOR_BLUE "NOTE" ANSI_COLOR_RESET "]\n"
                 "1. The moving average is calculated based on both number of\n"
                 "   runs and window size: window size <= number of runs\n"
-                "2. To calculate the speedup relative to a single thread,\n"
+                "2. To calculate the speedup relative to a single process,\n"
                 "   remember to set the "
                 ANSI_COLOR_MAGENTA "SEED" ANSI_COLOR_RESET
-                " to the same value used for single thread.\n"
+                " to the same value used for single process.\n"
                 "3. "
                 ANSI_COLOR_MAGENTA "%d " ANSI_COLOR_RESET
-                "is the optimal number of threads to be chosen.\n",
+                "is the optimal number of processes to be chosen.\n",
                 NULL == name ? "" : name, get_nprocs());
-        exit(status);
+        MPI_Abort(MPI_COMM_WORLD, status);
 }

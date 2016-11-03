@@ -9,14 +9,13 @@
 #include "psrs/stats.h"
 #include "psrs/timing.h"
 
-#include <err.h>
 #include <errno.h>
 #include <math.h>    /* ceil() */
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#if 0
 /*
  * Even though it is a file scope variable, it is initialized and destroyed
  * in thread_spawn function; and can be perceived as it is "owned" by the
@@ -68,106 +67,107 @@ static pthread_mutex_t g_total_samples_mtx = PTHREAD_MUTEX_INITIALIZER;
  * threads in the next phase.
  */
 static struct list *g_pivot_list;
+#endif
 
-int sort_launch(const struct cli_arg *const arg)
+void sort_launch(const struct cli_arg *const arg)
 {
+        int rank = 0;
         double average = .0;
         double n_thread_time = .0;
         struct moving_window *window = NULL;
 
-        if (NULL == arg || 0U == arg->thread) {
+        if (NULL == arg || 0 == arg->process) {
                 errno = EINVAL;
-                return -1;
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 
         if (0 > moving_window_init(&window, arg->window)) {
-                return -1;
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 
-        if (1U == arg->thread) {
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+        if (1 == arg->process) {
                 if (0 > sequential_sort(&average, arg)) {
-                        return -1;
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
-        } else if (1U < arg->thread) {
+        } else if (1 < arg->process) {
+#if 0
                 for (size_t i = 0; i < arg->run; ++i) {
-                        if (0 > thread_spawn(&n_thread_time, arg)) {
-                                return -1;
+                        if (0 > psort_launch(&n_thread_time, arg)) {
+                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                         }
 
                         if (0 > moving_window_push(window, n_thread_time)) {
-                                return -1;
+                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                         }
                 }
 
                 if (0 > moving_average_calc(window, &average)) {
-                        return -1;
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+#endif
+        }
+
+        if (0 == rank) {
+                if (arg->binary) {
+                        fwrite(&average, sizeof(average), 1U, stdout);
+                } else {
+                        printf("%f\n", average);
                 }
         }
 
-        if (arg->binary) {
-                fwrite(&average, sizeof(average), 1U, stdout);
-        } else {
-                printf("%f\n", average);
-        }
-
         moving_window_destroy(&window);
-        return 0;
+        MPI_Barrier(MPI_COMM_WORLD);
 }
 
-static int thread_spawn(double *elapsed, const struct cli_arg *const arg)
+static void psort_launch(double *elapsed, const struct cli_arg *const arg)
 {
         long *array = NULL;
-        /* Number of elements to be processed per thread. */
-        long chunk_size = (long)ceil((double)arg->length / arg->thread);
-        struct thread_arg *thread_info = NULL;
+        /* Number of elements to be processed per process. */
+        int chunk_size = (int)ceil((double)arg->length / arg->process);
+        struct process_arg process_info;
         double *one_time_elapsed = NULL;
-        g_total_length = arg->length;
-        g_total_threads = arg->thread;
 
-        if (NULL == arg) {
+        if (NULL == elapsed || NULL == arg) {
                 errno = EINVAL;
-                return -1;
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 
-        if (pthread_barrier_init(&g_barrier, NULL, arg->thread)) {
-                return -1;
+        /* Initialize the 'process_info' for each process. */
+        memset(&process_info, 0, sizeof(struct process_arg));
+        MPI_Comm_rank(MPI_COMM_WORLD, &(process_info.id));
+
+        if (0 == process_info.id) {
+                process_info.root = true;
+        } else {
+                process_info.root = false;
         }
 
-        thread_info = malloc(sizeof(struct thread_arg) * arg->thread);
-
-        if (NULL == thread_info) {
-                return -1;
-        }
-        if (0 > array_generate(&array, arg->length, arg->seed)) {
-                return -1;
+        /* Only the root process needs to generate the array. */
+        if (process_info.root) {
+                if (0 > array_generate(&array, arg->length, arg->seed)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
         }
 
-        /*
-         * According to 29.3 (chapter 29 section 3) of
-         * "The Linux Programming Interface":
-         *
-         * SUSv3 explicitly notes that the implementation need not initialize
-         * the buffer pointed to by thread before the new thread starts
-         * executing; that is, the new thread may start running before
-         * pthread_create() returns to its caller.
-         * If the new thread needs to obtain its own ID, then it must do so
-         * using pthread_self().
-         */
+        /* Temporary conditional to prevent memory leak. */
+        if (process_info.root) {
+                array_destroy(&array);
+        }
+        /* Temporary conditional to prevent memory leak. */
 
+        MPI_Barrier(MPI_COMM_WORLD);
+#if 0
         /* Initialize the first element to be master thread. */
-        thread_info[0U].master = true;
-        thread_info[0U].id = 0U;
-        thread_info[0U].tid = pthread_self();
         thread_info[0U].head = array;
         thread_info[0U].size = chunk_size;
-        for (unsigned int i = 1U; i < arg->thread; ++i) {
-                thread_info[i].master = false;
-                thread_info[i].id = i;
-                thread_info[i].head = thread_info[i-1U].head +\
+        for (int i = 1U; i < arg->thread; ++i) {
+                thread_info[i].head = thread_info[i-1].head +\
                                       chunk_size;
                 /* The last thread get remaining elements */
                 if (arg->thread - 1 == i) {
-                        if (0U != arg->length % chunk_size) {
+                        if (0 != arg->length % chunk_size) {
                                 thread_info[i].size = arg->length % chunk_size;
                                 g_max_sample_size = arg->length % chunk_size;
                         } else {
@@ -197,11 +197,11 @@ static int thread_spawn(double *elapsed, const struct cli_arg *const arg)
         }
 
         *elapsed = *one_time_elapsed;
-        pthread_barrier_destroy(&g_barrier);
-        array_destroy(&array);
+        if (process_info.root) {
+                array_destroy(&array);
+        }
         free(one_time_elapsed);
-        free(thread_info);
-        return 0;
+#endif
 }
 
 static int sequential_sort(double *average, const struct cli_arg *const arg)
@@ -256,29 +256,7 @@ static int sequential_sort(double *average, const struct cli_arg *const arg)
         return 0;
 }
 
-/*
- * According to 29.3 (chapter 29 section 3) of
- * "The Linux Programming Interface":
- *
- * Caution is required when using a cast integer as the return value of a
- * thread’s
- * start function. The reason for this is that PTHREAD_CANCELED , the value
- * returned
- * when a thread is canceled (see Chapter 32), is usually some implementation-
- * defined integer value cast to void *. If a thread’s start function returns
- * the
- * same integer value, then, to another thread that is doing a pthread_join(),
- * it will wrongly appear that the thread was canceled. In an application that
- * employs
- * thread cancellation and chooses to return cast integer values from a
- * thread’s
- * start functions, we must ensure that a normally terminating thread does not
- * return an integer whose value matches PTHREAD_CANCELED on that Pthreads
- * implementation. A portable application would need to ensure that normally
- * terminating threads don’t return integer values that match PTHREAD_CANCELED
- * on
- * any of the implementations on which the application is to run.
- */
+#if 0
 static void *parallel_sort(void *argument)
 {
         struct thread_arg *arg = (struct thread_arg *)argument;
@@ -535,6 +513,7 @@ static void *parallel_sort(void *argument)
                 return NULL;
         }
 }
+#endif
 
 static int long_compare(const void *left, const void *right)
 {

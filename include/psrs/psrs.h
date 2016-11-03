@@ -3,23 +3,36 @@
 
 #include "macro.h"
 
-#include <inttypes.h>
+#include <mpi.h>
 #include <stdbool.h>
 #include <stddef.h>
 
+/*
+ * Ensure all the members are of builtin types so MPI can transmit them
+ * easily without worrying about custom defined types.
+ */
 struct cli_arg {
-        bool binary; /* Whether output the moving average in binary format. */
-        size_t length;
-        size_t run;
+        /* Whether output the moving average in binary format. */
+        unsigned int binary;
+        /*
+         * Contrary to common practice these days, the 'count' formal parameter
+         * of 'MPI_Send' is of 'int' type instead of 'size_t', so here a
+         * similar convention needs to be maintained.
+         */
+        int length;
+        unsigned int run;
         unsigned int seed;
-        unsigned int thread;
-        size_t window;
+        /*
+         * 'process' is not a command line parameter directly supplied to the
+         * program itself, but 'mpiexec' instead.
+         */
+        int process;
+        unsigned int window;
 };
 
 #ifdef PSRS_PSRS_ONLY
 static int argument_parse(struct cli_arg *result, int argc, char *argv[]);
-static int sizet_convert(size_t *size, const char *const candidate);
-static int unsigned_convert(unsigned int *number, const char *const candidate);
+static void argument_bcast(struct cli_arg *arg);
 static void usage_show(const char *name, int status, const char *msg);
 #endif
 
