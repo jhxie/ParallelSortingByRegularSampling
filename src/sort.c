@@ -73,7 +73,7 @@ void sort_launch(const struct cli_arg *const arg)
 {
         int rank = 0;
         double average = .0;
-        double n_thread_time = .0;
+        double n_process_time = .0;
         struct moving_window *window = NULL;
 
         if (NULL == arg || 0 == arg->process) {
@@ -92,21 +92,18 @@ void sort_launch(const struct cli_arg *const arg)
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
         } else if (1 < arg->process) {
-#if 0
                 for (size_t i = 0; i < arg->run; ++i) {
-                        if (0 > psort_launch(&n_thread_time, arg)) {
-                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-                        }
+                        psort_launch(&n_process_time, arg);
 
-                        if (0 > moving_window_push(window, n_thread_time)) {
+                        if (0 > moving_window_push(window, n_process_time)) {
                                 MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                         }
+                        MPI_Barrier(MPI_COMM_WORLD);
                 }
 
                 if (0 > moving_average_calc(window, &average)) {
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
-#endif
         }
 
         if (0 == rank) {
@@ -127,7 +124,7 @@ static void psort_launch(double *elapsed, const struct cli_arg *const arg)
         /* Number of elements to be processed per process. */
         int chunk_size = (int)ceil((double)arg->length / arg->process);
         struct process_arg process_info;
-        double *one_time_elapsed = NULL;
+        double one_time_elapsed = 0;
 
         if (NULL == elapsed || NULL == arg) {
                 errno = EINVAL;
@@ -137,6 +134,8 @@ static void psort_launch(double *elapsed, const struct cli_arg *const arg)
         /* Initialize the 'process_info' for each process. */
         memset(&process_info, 0, sizeof(struct process_arg));
         MPI_Comm_rank(MPI_COMM_WORLD, &(process_info.id));
+        process_info.total_size = arg->length;
+        process_info.process = arg->process;
 
         if (0 == process_info.id) {
                 process_info.root = true;
@@ -149,59 +148,96 @@ static void psort_launch(double *elapsed, const struct cli_arg *const arg)
                 if (0 > array_generate(&array, arg->length, arg->seed)) {
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
+#if 0
+                puts("The array to be sorted is:");
+                for (int i = 0; i < arg->length; ++i) {
+                        printf("%ld\t", array[i]);
+                }
+                puts("\n--------------------");
+#endif
         }
 
-        /* Temporary conditional to prevent memory leak. */
-        if (process_info.root) {
-                array_destroy(&array);
+        /*
+         * Every other process waits for the root until array generation is
+         * complete.
+         */
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        /*
+         * For all the processes other than the last, the size of the array
+         * it needs to sort is just 'chunk_size'.
+         */
+        if (arg->process != (process_info.id + 1)) {
+                process_info.size = chunk_size;
+        } else {
+                /*
+                 * For the last process, 2 scenarios need to be considered:
+                 * whether the total length of array ('arg->length') is fully
+                 * divisible by 'chunk_size'; if not the last process only
+                 * needs to sort the remainder; otherwise the size is the same
+                 * as every other process.
+                 */
+                if (0 != (arg->length % chunk_size)) {
+                        process_info.size = arg->length % chunk_size;
+                        process_info.max_sample_size = process_info.size;
+                } else {
+                        process_info.size = chunk_size;
+                        process_info.max_sample_size = arg->process;
+                }
         }
-        /* Temporary conditional to prevent memory leak. */
+
+        /*
+         * Each process allocate the memory needed to store the sub-array.
+         *
+         * NOTE: Ownership is preserved in this function.
+         */
+        process_info.head = (long *)calloc(process_info.size, sizeof(long));
 
         MPI_Barrier(MPI_COMM_WORLD);
+
+        /*
+         * Last process broadcast the 'max_sample_size' member to every
+         * other process.
+         */
+        MPI_Bcast(&(process_info.max_sample_size),
+                  1,
+                  MPI_INT,
+                  arg->process - 1,
+                  MPI_COMM_WORLD);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        /* Scatter the sub-array to each process. */
+        MPI_Scatter(array,
+                    chunk_size,
+                    MPI_LONG,
+                    process_info.head,
+                    chunk_size,
+                    MPI_LONG,
+                    0,
+                    MPI_COMM_WORLD);
+
 #if 0
-        /* Initialize the first element to be master thread. */
-        thread_info[0U].head = array;
-        thread_info[0U].size = chunk_size;
-        for (int i = 1U; i < arg->thread; ++i) {
-                thread_info[i].head = thread_info[i-1].head +\
-                                      chunk_size;
-                /* The last thread get remaining elements */
-                if (arg->thread - 1 == i) {
-                        if (0 != arg->length % chunk_size) {
-                                thread_info[i].size = arg->length % chunk_size;
-                                g_max_sample_size = arg->length % chunk_size;
-                        } else {
-                                thread_info[i].size = chunk_size;
-                                g_max_sample_size = g_total_threads;
+        for (int i = 0; i < arg->process; ++i) {
+                if (process_info.id == i) {
+                        printf("Sub-array of process #%d\n", process_info.id);
+                        for (int j = 0; j < process_info.size; ++j) {
+                                printf("%ld\t", process_info.head[j]);
                         }
-                } else {
-                        thread_info[i].size = chunk_size;
+                        puts("\n--------------------");
                 }
-                if (pthread_create(&thread_info[i].tid,
-                                   NULL,
-                                   parallel_sort,
-                                   &thread_info[i])) {
-                        return -1;
-                }
+                MPI_Barrier(MPI_COMM_WORLD);
         }
-        one_time_elapsed = parallel_sort(&thread_info[0U]);
+#endif
 
-        if (NULL == one_time_elapsed) {
-                return -1;
-        }
+        parallel_sort(&one_time_elapsed, &process_info);
+        free(process_info.head);
 
-        for (unsigned int i = 1U; i < arg->thread; ++i) {
-                if (pthread_join(thread_info[i].tid, NULL)) {
-                        return -1;
-                }
-        }
+        *elapsed = one_time_elapsed;
 
-        *elapsed = *one_time_elapsed;
         if (process_info.root) {
                 array_destroy(&array);
         }
-        free(one_time_elapsed);
-#endif
 }
 
 static int sequential_sort(double *average, const struct cli_arg *const arg)
@@ -256,141 +292,92 @@ static int sequential_sort(double *average, const struct cli_arg *const arg)
         return 0;
 }
 
-#if 0
-static void *parallel_sort(void *argument)
+static void parallel_sort(double *elapsed, const struct process_arg *const arg)
 {
-        struct thread_arg *arg = (struct thread_arg *)argument;
         struct timespec start;
-        double *elapsed = NULL;
-        long *gathered_samples = NULL;
-        /* w = n / p^2 */
-        size_t window = g_total_length / (g_total_threads * g_total_threads);
-        /* ρ (rho) = floor(p / 2) */
-        size_t pivot_step = g_total_threads / 2;
 
-        struct list_iter *iter = NULL;
-        long pivot = 0;
-        size_t part_idx = 0U;
-        size_t sub_idx = 0U;
-        size_t prev_part_size = 0U;
+        /* Phase 1 Result */
+        struct partition local_samples;
 
-        size_t part_size = 0U;
+        /* Phase 2.1 - 2.2 Result */
+        struct partition pivots;
+
+        /* Phase 2.3 Result */
+        /* An array of 'partition's. */
+        struct part_blk *blk = NULL;
+
+        /* Phase 3 Result */
+        struct part_blk *blk_copy = NULL;
+
+        int part_size = 0;
 
         struct partition running_result;
         struct partition merge_dump;
         /*
          * NOTE:
-         * If any single thread fails, the final result would be wrong.
-         * To check for sorting failures, the result obtained from PSRS
-         * is compared with the one produced by sequential_sort.
+         * If any single process fails, the whole progress group identified
+         * by 'MPI_COMM_WORLD' communicator would abort.
+         *
+         * This implementaion does not fully handle the case where the
+         * 'arg->total_size' of the array is not fully divisible by
+         * 'arg->process' since 'MPI_Gather' would access out of bound
+         * memory region for the last process with maximum rank.
          */
 
-        if (arg->master) {
-                elapsed = (double *)malloc(sizeof(double));
-                if (NULL == elapsed) {
-                        return NULL;
-                }
-                timing_reset(&start);
-        }
+        timing_reset(&start);
+        MPI_Barrier(MPI_COMM_WORLD);
 
-        pthread_barrier_wait(&g_barrier);
-        if (arg->master) {
+        if (arg->root) {
                 timing_start(&start);
         }
 
-        /* Phase 1 */
-        /* 1.1 Sort disjoint local data. */
-        qsort(arg->head, arg->size, sizeof(long), long_compare);
-        /* 1.2 Begin regular sampling load balancing heuristic. */
-        if (0 > list_init(&arg->samples)) {
-                return NULL;
-        }
-
-        for (size_t idx = 0, picked = 0;
-             idx < arg->size && picked < g_max_sample_size;
-             idx += window, ++picked) {
-                if (0 > list_add(arg->samples, arg->head[idx])) {
-                        return NULL;
-                }
-                if (pthread_mutex_lock(&g_total_samples_mtx)) {
-                        return NULL;
-                }
-                ++g_total_samples;
-                if (pthread_mutex_unlock(&g_total_samples_mtx)) {
-                        return NULL;
-                }
-                if (0U == window) {
-                        break;
-                }
-        }
-        /* Wait until all threads finish writing their own samples. */
-        pthread_barrier_wait(&g_barrier);
+        /*
+         * Phase 1
+         *
+         * Local regular samples of all process are written into
+         * 'local_samples' structure.
+         *
+         * NOTE: Ownership of 'local_samples.head' is transferred back to
+         * this function first, then to 'pivots_bcast' later.
+         */
+        local_sort(&local_samples, arg);
 
         /*
          * Phase 2 - Find Pivots then Partition.
          */
-        if (arg->master) {
-                /* 2.1 Sort the collected samples. */
-                /*
-                 * Use calloc instead of malloc to silence the "conditional
-                 * jump based on uninitialized heap variable" warning
-                 * coming from valgrind.
-                 */
-                gathered_samples = (long *)calloc(g_total_samples,
-                                                  sizeof(long));
-                if (0 > list_init(&g_pivot_list)) {
-                        return NULL;
-                }
-                for (size_t i = 0, last = 0; i < g_total_threads; ++i) {
-                        list_copy(arg[i].samples, gathered_samples + last);
-                        last += arg[i].samples->size;
-                }
-                qsort(gathered_samples,
-                      g_total_samples,
-                      sizeof(long),
-                      long_compare);
-                /* 2.2 p - 1 pivots are selected from the regular sample. */
-                for (size_t i = g_total_threads + pivot_step, count = 0;
-                     i < g_total_samples && count < g_total_threads - 1;
-                     i += g_total_threads, ++count) {
-                        list_add(g_pivot_list, gathered_samples[i]);
-                }
-                free(gathered_samples);
-                gathered_samples = NULL;
-        }
-        pthread_barrier_wait(&g_barrier);
-        /* Samples from each individual threads are no longer needed. */
-        list_destroy(&arg->samples);
 
-        /* 2.3
-         * Each processor receives a copy of the pivots and forms p partitions
-         * from their sorted local blocks; in this case a common copy
-         * 'g_pivot_list' is used for sharing pivots; each thread keeps its own
-         * "progress information" in the 'g_pivot_list' through a 'list_iter'
-         * structure.
+        /*
+         * Phase 2.1 - 2.2
+         *
+         * Given 'local_samples' from each process, forms 'total_samples'
+         * and picks, broadcasts 'pivots' to all processes.
+         *
+         * NOTE: Ownership of 'pivots.head' is transferred back to
+         * this function.
          */
-        list_iter_init(&iter, g_pivot_list);
-        arg->part = (struct partition *)calloc(g_pivot_list->size + 1U,
-                                               sizeof(struct partition));
-        arg->part[part_idx].start = arg->head;
-        while (NULL != iter->pos) {
-                list_iter_walk(iter, &pivot);
-                for (sub_idx = 0;
-                     arg->part[part_idx].start[sub_idx] <= pivot;
-                     ++sub_idx);
-                if (0 == sub_idx) {
-                        ++sub_idx;
-                }
-                arg->part[part_idx].size = sub_idx;
-                prev_part_size += sub_idx;
-                arg->part[part_idx + 1U].start = arg->part[part_idx].start +\
-                                                 arg->part[part_idx].size;
-                ++part_idx;
-        }
-        arg->part[part_idx].size = arg->size - prev_part_size;
+        pivots_bcast(&pivots, &local_samples, arg);
 
-        pthread_barrier_wait(&g_barrier);
-        list_iter_destroy(&iter);
+        /*
+         * Abort if the total number of pivots is not 1 less than the total
+         * number of processes.
+         */
+        if (arg->process != pivots.size + 1) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        /* Phase 2.3
+         *
+         * Each process receives a copy of the 'pivots' and forms p partitions
+         * from their sorted local blocks.
+         *
+         * NOTE: 'blk' temporarily lends to 'partition_form', the ownership
+         * is not transferred; but the ownership of 'pivots.head' is
+         * transferred because 'pivots.head' is not needed after this phase.
+         */
+        if (0 > part_blk_init(&blk, false, pivots.size + 1)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+        partition_form(blk, &pivots, arg);
 
         /*
          * Phase 3 - Exchange Partitions
@@ -404,6 +391,18 @@ static void *parallel_sort(void *argument)
          * which merely records the beginning addresses and size for each
          * partition and no copy is involved.
          */
+#if 0
+        for (int i = 0; i < arg->process; ++i) {
+                for (int j = 0; j < pivots.size + 1; ++j) {
+                        if (i != j) {
+                                if (i == arg->id) {
+                                } else if (j == arg->id) {
+                                }
+                        }
+                        MPI_Barrier(MPI_COMM_WORLD);
+                }
+        }
+
         arg->part_copy = (struct partition *)calloc(g_pivot_list->size + 1U,
                                                     sizeof(struct partition));
         arg->result_size = 0U;
@@ -512,8 +511,270 @@ static void *parallel_sort(void *argument)
         } else {
                 return NULL;
         }
-}
 #endif
+}
+
+static void
+local_sort(struct partition *const local_samples,
+           const struct process_arg *const arg)
+{
+        /* w = n / p^2 */
+        int window = arg->total_size / (arg->process * arg->process);
+        struct list *local_sample_list = NULL;
+
+        memset(local_samples, 0, sizeof(struct partition));
+
+        /* 1.1 Sort disjoint local data. */
+        qsort(arg->head, arg->size, sizeof(long), long_compare);
+        /* 1.2 Begin regular sampling load balancing heuristic. */
+        if (0 > list_init(&local_sample_list)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        for (int idx = 0, picked = 0;
+             idx < arg->size && picked < arg->max_sample_size;
+             idx += window, ++picked) {
+                if (0 > list_add(local_sample_list, arg->head[idx])) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                if (0U == window) {
+                        break;
+                }
+        }
+        local_samples->size = (int)local_sample_list->size;
+        /* Ownership is transferred back to caller. */
+        local_samples->head = (long *)calloc(local_samples->size,
+                                             sizeof(long));
+
+        if (NULL == local_samples) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        if (0 > list_copy(local_sample_list, local_samples->head)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        if (0 > list_destroy(&local_sample_list)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        /* Wait until all processes finish writing their own samples. */
+        MPI_Barrier(MPI_COMM_WORLD);
+
+#ifdef PRINT_DEBUG_INFO
+        for (int i = 0; i < arg->process; ++i) {
+                if (i == arg->id) {
+                        printf("Local samples from Process #%d\n", arg->id);
+                        for (int j = 0; j < local_samples->size; ++j) {
+                                printf("%ld\t", local_samples->head[j]);
+                        }
+                        puts("\n-----------------------");
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+#endif
+}
+
+static void
+pivots_bcast(struct partition *const pivots,
+             struct partition *const local_samples,
+             const struct process_arg *const arg)
+{
+        /* ρ (rho) = floor(p / 2) */
+        int pivot_step = arg->process / 2;
+        struct list *pivot_list = NULL;
+        struct partition total_samples;
+
+        memset(pivots, 0, sizeof(struct partition));
+        memset(&total_samples, 0, sizeof(struct partition));
+
+        MPI_Reduce(&(local_samples->size),
+                   &(total_samples.size),
+                   1,
+                   MPI_INT,
+                   MPI_SUM,
+                   0,
+                   MPI_COMM_WORLD);
+
+        if (arg->root) {
+                /*
+                 * Use calloc instead of malloc to silence the "conditional
+                 * jump based on uninitialized heap variable" warning
+                 * coming from valgrind.
+                 */
+                total_samples.head = (long *)calloc(total_samples.size,
+                                                    sizeof(long));
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        /* Gather local samples into the root process. */
+        MPI_Gather(local_samples->head,
+                   local_samples->size,
+                   MPI_LONG,
+                   total_samples.head,
+                   local_samples->size,
+                   MPI_LONG,
+                   0,
+                   MPI_COMM_WORLD);
+        /* Samples from each individual process are no longer needed. */
+        free(local_samples->head);
+        local_samples->head = NULL;
+
+#ifdef PRINT_DEBUG_INFO
+        if (arg->root) {
+                puts("Gathered samples from Root");
+                for (int j = 0; j < total_samples.size; ++j) {
+                        printf("%ld\t", total_samples.head[j]);
+                }
+                puts("\n-----------------------");
+        }
+#endif
+
+        /* 2.1 Sort the collected samples. */
+        if (arg->root) {
+                if (0 > list_init(&pivot_list)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                qsort(total_samples.head,
+                      total_samples.size,
+                      sizeof(long),
+                      long_compare);
+                /* 2.2 p - 1 pivots are selected from the regular sample. */
+                for (int i = arg->process + pivot_step, count = 0;
+                     i < total_samples.size && count < arg->process - 1;
+                     i += arg->process, ++count) {
+                        if (0 > list_add(pivot_list, total_samples.head[i])) {
+                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                        }
+                }
+                free(total_samples.head);
+                total_samples.head = NULL;
+                pivots->size = (int)pivot_list->size;
+                pivots->head = (long *)calloc(pivots->size, sizeof(long));
+
+                if (NULL == pivots->head) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+
+                if (0 > list_copy(pivot_list, pivots->head)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+
+                if (0 > list_destroy(&pivot_list)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+        }
+        /*
+         * Wait until root process finishes sorting the gathered samples
+         * and finds all the pivots.
+         */
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        /*
+         * Every process other than root needs to know the size of the
+         * 'pivots' array before allocate memory space for it.
+         */
+        MPI_Bcast(&(pivots->size),
+                  1,
+                  MPI_INT,
+                  0,
+                  MPI_COMM_WORLD);
+
+        if (false == arg->root) {
+                pivots->head = (long *)calloc(pivots->size, sizeof(long));
+
+                if (NULL == pivots->head) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(pivots->head,
+                  pivots->size,
+                  MPI_LONG,
+                  0,
+                  MPI_COMM_WORLD);
+
+#ifdef PRINT_DEBUG_INFO
+        for (int i = 0; i < arg->process; ++i) {
+                if (i == arg->id) {
+                        printf("Pivots from Process #%d\n", arg->id);
+                        for (int j = 0; j < pivots->size; ++j) {
+                                printf("%ld\t", pivots->head[j]);
+                        }
+                        puts("\n-----------------------");
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+#endif
+}
+
+static void
+partition_form(struct part_blk *const blk,
+               struct partition *const pivots,
+               const struct process_arg *const arg)
+{
+        int part_idx = 0;
+        int sub_idx = 0;
+        int prev_part_size = 0;
+        long pivot = 0;
+
+        blk->part[part_idx].head = arg->head;
+        for (int pivot_idx = 0; pivot_idx < pivots->size; ++pivot_idx) {
+                pivot = pivots->head[pivot_idx];
+                for (sub_idx = 0;
+                     blk->part[part_idx].head[sub_idx] <= pivot;
+                     ++sub_idx);
+                if (0 == sub_idx) {
+                        ++sub_idx;
+                }
+                blk->part[part_idx].size = sub_idx;
+                prev_part_size += sub_idx;
+                blk->part[part_idx + 1].head = blk->part[part_idx].head +\
+                                               blk->part[part_idx].size;
+                ++part_idx;
+        }
+        blk->part[part_idx].size = arg->size - prev_part_size;
+
+        free(pivots->head);
+        MPI_Barrier(MPI_COMM_WORLD);
+#ifdef PRINT_DEBUG_INFO
+        int per_process_size = 0, total_size = 0;
+
+        for (int i = 0; i < arg->process; ++i) {
+                if (i == arg->id) {
+                        printf("Partition Size for Process #%d\n",
+                               i);
+                        per_process_size = 0;
+                        /* Sum the size for all the partitions of a process. */
+                        for (int j = 0; j < blk->size; ++j) {
+                                per_process_size += blk->part[j].size;
+                        }
+                        printf("Partition Size is: %d\n", per_process_size);
+                        puts("\n-----------------------");
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+        MPI_Reduce(&per_process_size,
+                   &total_size,
+                   1,
+                   MPI_INT,
+                   MPI_SUM,
+                   0,
+                   MPI_COMM_WORLD);
+        if (arg->root) {
+                printf("Total Partition Size: %d\n", total_size);
+        }
+#endif
+}
+
+static void
+partition_exchange(struct part_blk *const blk_copy,
+                   struct part_blk *const blk,
+                   const struct process_arg *const arg)
+{
+}
 
 static int long_compare(const void *left, const void *right)
 {
@@ -576,5 +837,53 @@ static int array_merge(long output[const],
                         output[oindex] = right[rindex];
                 }
         }
+        return 0;
+}
+
+int part_blk_init(struct part_blk **self, bool clean, int size)
+{
+        struct part_blk *blk = NULL;
+        size_t total_size = sizeof(struct part_blk) +\
+                            size * sizeof(struct partition);
+
+        if (NULL == self || 0 >= size) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        blk = (struct part_blk *)malloc(total_size);
+
+        if (NULL == blk) {
+                return -1;
+        }
+
+        memset(blk, 0, total_size);
+        blk->clean = clean;
+        blk->size = size;
+
+        *self = blk;
+        return 0;
+}
+
+int part_blk_destroy(struct part_blk **self)
+{
+        struct part_blk *blk = NULL;
+
+        if (NULL == self) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        blk = *self;
+
+        if (blk->clean) {
+                for (int i = 0; i < blk->size; ++i) {
+                        free(blk->part[i].head);
+                }
+        }
+
+        free(blk);
+        *self = NULL;
+
         return 0;
 }

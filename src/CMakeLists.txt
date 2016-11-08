@@ -21,6 +21,23 @@ if(CMAKE_BUILD_TYPE MATCHES "Debug")
     target_compile_definitions(psrs PRIVATE  PRINT_DEBUG_INFO=1)
 endif()
 
+# ----------------------------- EXPERIMENTATION -------------------------------
+
+# add_executable(main "main.c")
+#
+# target_link_libraries(main ${MPI_C_LIBRARIES} m)
+# if(MPI_C_COMPILE_FLAGS)
+#       set_target_properties(main
+#           PROPERTIES COMPILE_FLAGS "${MPI_C_COMPILE_FLAGS}")
+# endif()
+#
+# if(MPI_C_LINK_FLAGS)
+#       set_target_properties(main
+#           PROPERTIES LINK_FLAGS "${MPI_C_LINK_FLAGS}")
+# endif()
+
+# ----------------------------- EXPERIMENTATION -------------------------------
+
 # install(TARGETS main
 # RUNTIME DESTINATION /usr/bin      COMPONENT Runtime)
 # LIBRARY DESTINATION lib      COMPONENT Runtime

@@ -29,18 +29,18 @@ if debug information is not needed (necessary for the
 To get usage help from the compiled program obtained from the last section:
 ```bash
 cd src
-./psrs -h
+mpiexec -n 1 ./psrs -h
 ```
-For example, to obtain the running time of one thread quick sort to be used as
+For example, to obtain the running time of one process quick sort to be used as
 a baseline for comparison:
 ```bash
-./psrs -l 10000000 -r 7 -s 10 -t 1 -w 5
+mpiexec -n 1 ./psrs -l 10000000 -r 7 -s 10 -w 5
 ```
-The *10000000* followed by the *-l* flag stands for the length of the generated
+The *1* followed by the *-n* flag stands for how many processes to be launched;
+the *10000000* followed by the *-l* flag stands for the length of the generated
 array; the *7* that comes after *-r* stands for how many runs are required in
 order to obtain the average; the *10* is the seed value supplied to the
-*PRNG* of the array generation function; the *1* followed by the *-t* flag
-stands for how many threads to be launched;  the last *5* argument for *-w*
+*PRNG* of the array generation function; the last *5* argument for *-w*
 flag denotes the window size for calculating moving average (number of runs
 must not be less than window size; otherwise moving average can not be
 calculated).
@@ -52,7 +52,7 @@ piping the average directly into another program.
 
 ## Speedup Comparison
 In order to get the speedup comparison graph using both array length and number
-of threads as independent variables, run the python script resides in *tools*
+of processes as independent variables, run the python script resides in *tools*
 subdirectory:
 ```bash
 python3 tools/plot.py -p build/src/psrs -s speedup.png -t table.png -r runtime.png
@@ -71,13 +71,13 @@ A sample speedup graph obtained by following the above instructions:
 
 The result is obtained from the following input table:
 
-| Array Size | Number of Threads |
-|:----------:|:-----------------:|
-| 2²⁰        | 1 2 4 8 16        |
-| 2²²        | 1 2 4 8 16        |
-| 2²⁴        | 1 2 4 8 16        |
-| 2²⁶        | 1 2 4 8 16        |
-| 2²⁸        | 1 2 4 8 16        |
+| Array Size | Number of Processes |
+|:----------:|:-------------------:|
+| 2²⁰        | 1 2 4 8 16          |
+| 2²²        | 1 2 4 8 16          |
+| 2²⁴        | 1 2 4 8 16          |
+| 2²⁶        | 1 2 4 8 16          |
+| 2²⁸        | 1 2 4 8 16          |
 
 The actual runtime is recorded in the following table:
 ![table](./doc/table.png)

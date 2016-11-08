@@ -65,7 +65,7 @@ int main(int argc, char *argv[])
          * DEBUG:
          * Check whether all the arguments are passed properly.
          */
-#ifdef PRINT_DEBUG_INFO
+#if 0
         for (int i = 0; i < arg.process; ++i) {
                 if (rank == i) {
                         printf("Process #%d\n", rank);
@@ -112,8 +112,8 @@ int main(int argc, char *argv[])
 static int argument_parse(struct cli_arg *result, int argc, char *argv[])
 {
         /* NOTE: All the flags followed by an extra colon require arguments. */
-        const static char *const OPT_STR = ":bhl:r:s:t:w:";
-        const static struct option OPTS[] = {
+        static const char *const OPT_STR = ":bhl:r:s:t:w:";
+        static const struct option OPTS[] = {
                 {"binary",   no_argument,       NULL, 'b'},
                 {"help",     no_argument,       NULL, 'h'},
                 {"length",   required_argument, NULL, 'l'},
