@@ -72,9 +72,15 @@ partition_form(struct part_blk *const blk,
 /* Phase 3 */
 static void
 partition_exchange(struct part_blk *const blk_copy,
-                   struct part_blk *const blk,
+                   struct part_blk *blk,
                    const struct process_arg *const arg);
 
+static void
+partition_send(struct part_blk *const blk_copy,
+               struct part_blk *const blk,
+               const int sid,
+               int *const pindex,
+               const struct process_arg *const arg);
 /* Phase 4 */
 
 static int
@@ -82,10 +88,15 @@ long_compare(const void *left, const void *right);
 
 static int
 array_merge(long output[const],
-            long left[const],
+            const long left[const],
             const size_t lsize,
-            long right[const],
+            const long right[const],
             const size_t rsize);
+
+static int bin_search(int *const index,
+                      const long value,
+                      const long array[const],
+                      const int size);
 #endif
 
 #endif /* SORT_H */

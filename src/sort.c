@@ -118,6 +118,54 @@ void sort_launch(const struct cli_arg *const arg)
         MPI_Barrier(MPI_COMM_WORLD);
 }
 
+int part_blk_init(struct part_blk **self, bool clean, int size)
+{
+        struct part_blk *blk = NULL;
+        size_t total_size = sizeof(struct part_blk) +\
+                            size * sizeof(struct partition);
+
+        if (NULL == self || 0 >= size) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        blk = (struct part_blk *)malloc(total_size);
+
+        if (NULL == blk) {
+                return -1;
+        }
+
+        memset(blk, 0, total_size);
+        blk->clean = clean;
+        blk->size = size;
+
+        *self = blk;
+        return 0;
+}
+
+int part_blk_destroy(struct part_blk **self)
+{
+        struct part_blk *blk = NULL;
+
+        if (NULL == self) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        blk = *self;
+
+        if (blk->clean) {
+                for (int i = 0; i < blk->size; ++i) {
+                        free(blk->part[i].head);
+                }
+        }
+
+        free(blk);
+        *self = NULL;
+
+        return 0;
+}
+
 static void psort_launch(double *elapsed, const struct cli_arg *const arg)
 {
         long *array = NULL;
@@ -309,8 +357,6 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
         /* Phase 3 Result */
         struct part_blk *blk_copy = NULL;
 
-        int part_size = 0;
-
         struct partition running_result;
         struct partition merge_dump;
         /*
@@ -390,39 +436,17 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
          * the 'part' member is filled by the last step of previous phase,
          * which merely records the beginning addresses and size for each
          * partition and no copy is involved.
+         *
+         * NOTE: Ownership of 'blk' is transferred to 'partition_exchange'
+         * function; the partition copies would be written into 'blk_copy'
+         * structure after the function returns.
          */
+        if (0 > part_blk_init(&blk_copy, true, pivots.size + 1)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+        partition_exchange(blk_copy, blk, arg);
+
 #if 0
-        for (int i = 0; i < arg->process; ++i) {
-                for (int j = 0; j < pivots.size + 1; ++j) {
-                        if (i != j) {
-                                if (i == arg->id) {
-                                } else if (j == arg->id) {
-                                }
-                        }
-                        MPI_Barrier(MPI_COMM_WORLD);
-                }
-        }
-
-        arg->part_copy = (struct partition *)calloc(g_pivot_list->size + 1U,
-                                                    sizeof(struct partition));
-        arg->result_size = 0U;
-        for (ssize_t i = -(ssize_t)arg->id, j = 0;
-             i < g_total_threads - arg->id &&
-             (size_t)j < g_pivot_list->size + 1U;
-             ++i, ++j) {
-                part_size = (*(arg + i)).part[arg->id].size;
-                arg->result_size += part_size;
-
-                arg->part_copy[j].start = (long *)calloc(part_size,
-                                                         sizeof(long));
-                arg->part_copy[j].size = part_size;
-                memcpy(arg->part_copy[j].start,
-                       (*(arg + i)).part[arg->id].start,
-                       part_size * sizeof(long));
-        }
-        pthread_barrier_wait(&g_barrier);
-        free(arg->part);
-
         /*
          * Phase 4 - Merge Partitions
          */
@@ -722,9 +746,20 @@ partition_form(struct part_blk *const blk,
         blk->part[part_idx].head = arg->head;
         for (int pivot_idx = 0; pivot_idx < pivots->size; ++pivot_idx) {
                 pivot = pivots->head[pivot_idx];
+#if 0
                 for (sub_idx = 0;
                      blk->part[part_idx].head[sub_idx] <= pivot;
                      ++sub_idx);
+#endif
+
+                if (0 > bin_search(&sub_idx,
+                                   pivot,
+                                   blk->part[part_idx].head,
+                                   arg->size - prev_part_size)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+
+
                 if (0 == sub_idx) {
                         ++sub_idx;
                 }
@@ -771,9 +806,97 @@ partition_form(struct part_blk *const blk,
 
 static void
 partition_exchange(struct part_blk *const blk_copy,
-                   struct part_blk *const blk,
+                   struct part_blk *blk,
                    const struct process_arg *const arg)
 {
+        int part_idx = 0;
+
+        /* i identifies the current sending process. */
+        for (int i = 0; i < arg->process; ++i) {
+                partition_send(blk_copy, blk, i, &part_idx, arg);
+        }
+
+        if (0 > part_blk_destroy(&blk)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+}
+
+static void
+partition_send(struct part_blk *const blk_copy,
+               struct part_blk *const blk,
+               const int sid,
+               int *const pindex,
+               const struct process_arg *const arg)
+{
+        if (NULL == blk_copy || NULL == blk ||\
+            0 > sid || NULL == pindex || 0 > *pindex || NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        /*
+         * Copy the corresponding partition to itself if the current sending
+         * process is the same as 'arg->id'.
+         */
+        if (sid == arg->id) {
+                blk_copy->part[*pindex].size = blk->part[arg->id].size;
+                blk_copy->part[*pindex].head = (long *)\
+                                               calloc(blk->part[arg->id].size,
+                                                      sizeof(long));
+                if (NULL == blk_copy->part[*pindex].head) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                memcpy(blk_copy->part[*pindex].head, blk->part[arg->id].head,
+                       blk->part[arg->id].size * sizeof(long));
+                ++*pindex;
+        }
+        /* j identifies the partition to be sent. */
+        for (int j = 0; j < arg->process; ++j) {
+                /*
+                 * There is no need to send anything if the id of the sender
+                 * process equals to the id of the partition to be sent.
+                 */
+                if (sid != j) {
+                        if (sid == arg->id) {
+                                MPI_Ssend(&(blk->part[j].size),
+                                          1,
+                                          MPI_INT,
+                                          j,
+                                          0,
+                                          MPI_COMM_WORLD);
+                                MPI_Ssend(blk->part[j].head,
+                                          blk->part[j].size,
+                                          MPI_LONG,
+                                          j,
+                                          0,
+                                          MPI_COMM_WORLD);
+                        } else if (j == arg->id) {
+                                MPI_Recv(&(blk_copy->part[*pindex].size),
+                                         1,
+                                         MPI_INT,
+                                         sid,
+                                         MPI_ANY_TAG,
+                                         MPI_COMM_WORLD,
+                                         MPI_STATUSES_IGNORE);
+                                blk_copy->part[*pindex].head =(long *)calloc(\
+                                                blk_copy->part[*pindex].size,
+                                                sizeof(long));
+                                if (NULL == blk_copy->part[*pindex].head) {
+                                        MPI_Abort(MPI_COMM_WORLD,
+                                                  EXIT_FAILURE);
+                                }
+                                MPI_Recv(blk_copy->part[*pindex].head,
+                                         blk_copy->part[*pindex].size,
+                                         MPI_LONG,
+                                         sid,
+                                         MPI_ANY_TAG,
+                                         MPI_COMM_WORLD,
+                                         MPI_STATUSES_IGNORE);
+                                ++*pindex;
+                        }
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
 }
 
 static int long_compare(const void *left, const void *right)
@@ -795,9 +918,9 @@ static int long_compare(const void *left, const void *right)
  * http://stanford.edu/~rezab/dao/notes/Lecture03/cme323_lec3.pdf
  */
 static int array_merge(long output[const],
-                       long left[const],
+                       const long left[const],
                        const size_t lsize,
-                       long right[const],
+                       const long right[const],
                        const size_t rsize)
 {
         size_t lindex = 0U, rindex = 0U, oindex = 0U;
@@ -840,50 +963,32 @@ static int array_merge(long output[const],
         return 0;
 }
 
-int part_blk_init(struct part_blk **self, bool clean, int size)
+static int bin_search(int *const index,
+                      const long value,
+                      const long array[const],
+                      const int size)
 {
-        struct part_blk *blk = NULL;
-        size_t total_size = sizeof(struct part_blk) +\
-                            size * sizeof(struct partition);
+        int start, middle, end;
 
-        if (NULL == self || 0 >= size) {
+        if (NULL == index || NULL == array || 0 >= size) {
                 errno = EINVAL;
                 return -1;
         }
 
-        blk = (struct part_blk *)malloc(total_size);
+        start = 0;
+        end = size - 1;
+        middle = (start + end) / 2;
 
-        if (NULL == blk) {
-                return -1;
-        }
-
-        memset(blk, 0, total_size);
-        blk->clean = clean;
-        blk->size = size;
-
-        *self = blk;
-        return 0;
-}
-
-int part_blk_destroy(struct part_blk **self)
-{
-        struct part_blk *blk = NULL;
-
-        if (NULL == self) {
-                errno = EINVAL;
-                return -1;
-        }
-
-        blk = *self;
-
-        if (blk->clean) {
-                for (int i = 0; i < blk->size; ++i) {
-                        free(blk->part[i].head);
+        while (start <= end) {
+                if (array[middle] <= value) {
+                        start = middle + 1;
+                } else if (array[middle] > value) {
+                        end = middle - 1;
                 }
+                middle = (start + end) / 2;
         }
 
-        free(blk);
-        *self = NULL;
+        *index = start;
 
         return 0;
 }
