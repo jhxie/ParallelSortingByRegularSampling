@@ -15,60 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if 0
-/*
- * Even though it is a file scope variable, it is initialized and destroyed
- * in thread_spawn function; and can be perceived as it is "owned" by the
- * thread_spawn function.
- *
- * The only other function that have read access to this variable is
- * parallel_sort; which can be perceived as "borrowed" by this function.
- */
-static pthread_barrier_t g_barrier;
-
-/*
- * The following two are initialized in thread_spawn function and accessed in
- * parallel_sort function as well.
- */
-static unsigned int g_total_threads;
-static size_t g_total_length;
-
-/*
- * This variable is set in the thread_spawn function and read from
- * parallel_sort function.
- */
-static size_t g_max_sample_size;
-
-/*
- * Phase 1:
- * This variable is written by multiple threads each time a sample is found;
- * after a barrier, it is read by the master.
- *
- * A mutex is needed to achieve mutual exclusion.
- */
-static volatile size_t g_total_samples;
-
-/*
- * NOTE:
- * At first in the author's opinion the previous variable does not require
- * a mutex to protect since an arithmetic addition operation is considered
- * as an atomic operation; and even though the addition operation is not,
- * the final result should also be the same.
- *
- * However, turns out the missing of a mutex for protecting against write
- * access for the g_total_samples results in a long march of bug hunt that
- * lasts for days as both GDB and Valgrind points to other source location for
- * segmentation violation that does not seem to have bug after inspection.
- */
-static pthread_mutex_t g_total_samples_mtx = PTHREAD_MUTEX_INITIALIZER;
-/*
- * Phase 2:
- * The selected pivots are pushed to this linked list to be shared by all the
- * threads in the next phase.
- */
-static struct list *g_pivot_list;
-#endif
-
 void sort_launch(const struct cli_arg *const arg)
 {
         int rank = 0;
@@ -92,7 +38,7 @@ void sort_launch(const struct cli_arg *const arg)
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
         } else if (1 < arg->process) {
-                for (size_t i = 0; i < arg->run; ++i) {
+                for (unsigned int i = 0; i < arg->run; ++i) {
                         psort_launch(&n_process_time, arg);
 
                         if (0 > moving_window_push(window, n_process_time)) {
@@ -166,7 +112,9 @@ int part_blk_destroy(struct part_blk **self)
         return 0;
 }
 
-static void psort_launch(double *elapsed, const struct cli_arg *const arg)
+static void
+psort_launch(double *const elapsed,
+             const struct cli_arg *const arg)
 {
         long *array = NULL;
         /* Number of elements to be processed per process. */
@@ -197,11 +145,14 @@ static void psort_launch(double *elapsed, const struct cli_arg *const arg)
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
 #if 0
+                puts("\n------------------------------");
+                puts("Phase 0: Array Generation from Root");
+                puts("\n------------------------------");
                 puts("The array to be sorted is:");
                 for (int i = 0; i < arg->length; ++i) {
                         printf("%ld\t", array[i]);
                 }
-                puts("\n--------------------");
+                puts("\n------------------------------");
 #endif
         }
 
@@ -266,13 +217,16 @@ static void psort_launch(double *elapsed, const struct cli_arg *const arg)
                     MPI_COMM_WORLD);
 
 #if 0
+        puts("\n------------------------------");
+        puts("Phase 1.1: Scattering Sub-Arrays to Each Process");
+        puts("\n------------------------------");
         for (int i = 0; i < arg->process; ++i) {
                 if (process_info.id == i) {
                         printf("Sub-array of process #%d\n", process_info.id);
                         for (int j = 0; j < process_info.size; ++j) {
                                 printf("%ld\t", process_info.head[j]);
                         }
-                        puts("\n--------------------");
+                        puts("\n------------------------------");
                 }
                 MPI_Barrier(MPI_COMM_WORLD);
         }
@@ -357,8 +311,8 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
         /* Phase 3 Result */
         struct part_blk *blk_copy = NULL;
 
-        struct partition running_result;
-        struct partition merge_dump;
+        /* Phase 4 Result */
+        struct partition result;
         /*
          * NOTE:
          * If any single process fails, the whole progress group identified
@@ -446,98 +400,64 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
         }
         partition_exchange(blk_copy, blk, arg);
 
-#if 0
         /*
          * Phase 4 - Merge Partitions
+         *
+         * NOTE: Ownership of 'blk_copy' is transferred to 'partition_merge'
+         * function while ownership of 'result.head' is transferred back
+         * from it for the ROOT process ONLY.
          */
-
-        /*
-         * Assume the 'g_pivot_list->size' is at least 1U.
-         * Perform a shallow copy of the 1st partition.
-         */
-        running_result = arg->part_copy[0U];
-        for (size_t i = 1U; i < g_pivot_list->size + 1U; ++i) {
-                merge_dump.size = running_result.size + arg->part_copy[i].size;
-                merge_dump.start = calloc(merge_dump.size, sizeof(long));
-                if (NULL == merge_dump.start) {
-                        return NULL;
-                }
-                array_merge(merge_dump.start,
-                            running_result.start,
-                            running_result.size,
-                            arg->part_copy[i].start,
-                            arg->part_copy[i].size);
-                free(running_result.start);
-                free(arg->part_copy[i].start);
-                running_result = merge_dump;
-        }
-        arg->result = running_result.start;
-        pthread_barrier_wait(&g_barrier);
-
-        /* 4.2 The concatenation of all the lists is the final sorted list. */
-        if (arg->master) {
-                for (size_t i = 0U, last_size = 0U; i < g_total_threads; ++i) {
-                        memcpy(arg->head + last_size,
-                               arg[i].result,
-                               arg[i].result_size * sizeof(long));
-                        last_size += arg[i].result_size;
-                }
-        }
-        pthread_barrier_wait(&g_barrier);
-        free(arg->result);
+        partition_merge(&result, blk_copy, arg);
 
         /* End */
-        if (arg->master) {
+        if (arg->root) {
                 timing_stop(elapsed, &start);
 #ifdef PRINT_DEBUG_INFO
-                size_t verify_sum = 0U;
-#endif
-                for (size_t i = 0U; i < g_total_threads; ++i) {
-#ifdef PRINT_DEBUG_INFO
-                        printf("Result Size of Thread #%zu: %zu\n",
-                               i, arg[i].result_size);
-                        verify_sum += arg[i].result_size;
-#endif
-                        free(arg[i].part_copy);
+                puts("\n------------------------------");
+                puts("Phase 5: Result Verification");
+                puts("\n------------------------------");
+                long *cmp = calloc(arg->total_size, sizeof(long));
+                memcpy(cmp, result.head, arg->total_size * sizeof(long));
+                qsort(cmp, arg->total_size, sizeof(long), long_compare);
+#if 0
+                puts("The sorted array is:");
+                for (int i = 0; i < arg->total_size; ++i) {
+                        printf("%ld\t", result.head[i]);
                 }
-                /*
-                 * NOTE: The result size is completely wrong.
-                 * To be fixed.
-                 */
-#ifdef PRINT_DEBUG_INFO
-                printf("Result Size: %zu\n", verify_sum);
-                printf("Pivots: %zu\n", g_pivot_list->size);
-                long *cmp = calloc(g_total_length, sizeof(long));
-                memcpy(cmp, arg->head, g_total_length * sizeof(long));
-                qsort(cmp, g_total_length, sizeof(long), long_compare);
+#endif
                 if (0 !=
-                    memcmp(cmp, arg->head, g_total_length * sizeof(long))) {
+                    memcmp(cmp, result.head, arg->total_size * sizeof(long))) {
                         puts("The Result is Wrong!");
                         puts("------------------------------");
 
 #if 0
                         puts("Correct Sorted List:");
-                        for (size_t i = 0; i < g_total_length; ++i) {
+                        for (size_t i = 0; i < arg->total_size; ++i) {
                                 printf("%ld\t", cmp[i]);
                         }
                         puts("");
                         puts("Actual Sorted List:");
-                        for (size_t i = 0; i < g_total_length; ++i) {
+                        for (size_t i = 0; i < arg->total_size; ++i) {
                                 printf("%ld\t", arg->head[i]);
                         }
                         puts("");
 #endif
+                } else {
+                        puts("The Result is Right!");
+                        puts("------------------------------");
                 }
                 free(cmp);
+                free(result.head);
 #endif
-                list_destroy(&g_pivot_list);
-                return elapsed;
-        } else {
-                return NULL;
         }
-#endif
 }
 
+/* ------------------------------- Phase 1.1 ------------------------------- */
+static void
+local_scatter(const struct process_arg *const arg);
+/* ------------------------------- Phase 1.1 ------------------------------- */
+
+/* ------------------------------- Phase 1.2 ------------------------------- */
 static void
 local_sort(struct partition *const local_samples,
            const struct process_arg *const arg)
@@ -585,20 +505,25 @@ local_sort(struct partition *const local_samples,
         /* Wait until all processes finish writing their own samples. */
         MPI_Barrier(MPI_COMM_WORLD);
 
-#ifdef PRINT_DEBUG_INFO
+#if 0
+        puts("\n------------------------------");
+        puts("Phase 1.2: Sorting Local Samples");
+        puts("\n------------------------------");
         for (int i = 0; i < arg->process; ++i) {
                 if (i == arg->id) {
                         printf("Local samples from Process #%d\n", arg->id);
                         for (int j = 0; j < local_samples->size; ++j) {
                                 printf("%ld\t", local_samples->head[j]);
                         }
-                        puts("\n-----------------------");
+                        puts("\n------------------------------");
                 }
                 MPI_Barrier(MPI_COMM_WORLD);
         }
 #endif
 }
+/* ------------------------------- Phase 1.2 ------------------------------- */
 
+/* ---------------------------- Phase 2.1 - 2.2 ---------------------------- */
 static void
 pivots_bcast(struct partition *const pivots,
              struct partition *const local_samples,
@@ -644,13 +569,16 @@ pivots_bcast(struct partition *const pivots,
         free(local_samples->head);
         local_samples->head = NULL;
 
-#ifdef PRINT_DEBUG_INFO
+#if 0
+        puts("\n------------------------------");
+        puts("Phase 2.1: Gathering Samples from Root");
+        puts("\n------------------------------");
         if (arg->root) {
                 puts("Gathered samples from Root");
                 for (int j = 0; j < total_samples.size; ++j) {
                         printf("%ld\t", total_samples.head[j]);
                 }
-                puts("\n-----------------------");
+                puts("\n------------------------------");
         }
 #endif
 
@@ -719,20 +647,25 @@ pivots_bcast(struct partition *const pivots,
                   0,
                   MPI_COMM_WORLD);
 
-#ifdef PRINT_DEBUG_INFO
+#if 0
+        puts("\n------------------------------");
+        puts("Phase 2.2: Receiving Pivots");
+        puts("\n------------------------------");
         for (int i = 0; i < arg->process; ++i) {
                 if (i == arg->id) {
                         printf("Pivots from Process #%d\n", arg->id);
                         for (int j = 0; j < pivots->size; ++j) {
                                 printf("%ld\t", pivots->head[j]);
                         }
-                        puts("\n-----------------------");
+                        puts("\n------------------------------");
                 }
                 MPI_Barrier(MPI_COMM_WORLD);
         }
 #endif
 }
+/* ---------------------------- Phase 2.1 - 2.2 ---------------------------- */
 
+/* ------------------------------- Phase 2.3 ------------------------------- */
 static void
 partition_form(struct part_blk *const blk,
                struct partition *const pivots,
@@ -773,9 +706,12 @@ partition_form(struct part_blk *const blk,
 
         free(pivots->head);
         MPI_Barrier(MPI_COMM_WORLD);
-#ifdef PRINT_DEBUG_INFO
+#if 0
         int per_process_size = 0, total_size = 0;
 
+        puts("\n------------------------------");
+        puts("Phase 2.3: Splitting Sub-Array into Partitions");
+        puts("\n------------------------------");
         for (int i = 0; i < arg->process; ++i) {
                 if (i == arg->id) {
                         printf("Partition Size for Process #%d\n",
@@ -786,7 +722,7 @@ partition_form(struct part_blk *const blk,
                                 per_process_size += blk->part[j].size;
                         }
                         printf("Partition Size is: %d\n", per_process_size);
-                        puts("\n-----------------------");
+                        puts("\n------------------------------");
                 }
                 MPI_Barrier(MPI_COMM_WORLD);
         }
@@ -803,7 +739,9 @@ partition_form(struct part_blk *const blk,
         }
 #endif
 }
+/* ------------------------------- Phase 2.3 ------------------------------- */
 
+/* -------------------------------- Phase 3 -------------------------------- */
 static void
 partition_exchange(struct part_blk *const blk_copy,
                    struct part_blk *blk,
@@ -820,6 +758,38 @@ partition_exchange(struct part_blk *const blk_copy,
                 MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 
+#if 0
+        int per_process_size = 0, total_size = 0;
+
+        puts("\n------------------------------");
+        puts("Phase 3: Exchanging Partitions");
+        puts("\n------------------------------");
+        for (int i = 0; i < arg->process; ++i) {
+                if (i == arg->id) {
+                        per_process_size = 0;
+                        /* Sum the size for all the partitions of a process. */
+                        for (int j = 0; j < blk_copy->size; ++j) {
+                                per_process_size += blk_copy->part[j].size;
+                        }
+                        printf("Partition Size for Process #%d is: %d\n",
+                               i, per_process_size);
+                        puts("\n------------------------------");
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+        MPI_Reduce(&per_process_size,
+                   &total_size,
+                   1,
+                   MPI_INT,
+                   MPI_SUM,
+                   0,
+                   MPI_COMM_WORLD);
+        if (arg->root) {
+                printf("Total Partition Size: %d\n", total_size);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+#endif
 }
 
 static void
@@ -898,6 +868,120 @@ partition_send(struct part_blk *const blk_copy,
                 MPI_Barrier(MPI_COMM_WORLD);
         }
 }
+/* -------------------------------- Phase 3 -------------------------------- */
+
+/* -------------------------------- Phase 4 -------------------------------- */
+static void
+partition_merge(struct partition *const result,
+                struct part_blk *blk_copy,
+                const struct process_arg *const arg)
+{
+        struct partition running_result;
+        struct partition merge_dump;
+
+        memset(result, 0, sizeof(struct partition));
+
+        /* Perform a shallow copy of the 1st partition. */
+        running_result = blk_copy->part[0];
+        for (int i = 1; i < arg->process; ++i) {
+                merge_dump.size = running_result.size + blk_copy->part[i].size;
+                merge_dump.head = calloc(merge_dump.size, sizeof(long));
+                if (NULL == merge_dump.head) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                array_merge(merge_dump.head,
+                            running_result.head,
+                            running_result.size,
+                            blk_copy->part[i].head,
+                            blk_copy->part[i].size);
+#if 0
+                free(running_result.head);
+                free(blk_copy->part[i].head);
+#endif
+                running_result = merge_dump;
+        }
+
+        /*
+         * The merged result of all partitions is stored in 'running_result'.
+         * 'blk_copy' can be safely discarded for all processes.
+         */
+        if (0 > part_blk_destroy(&blk_copy)) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        /*
+         * Root process copies 'running_result.head' into the tentative
+         * final 'result' since later on there is no need for the root
+         * process to send merged partitions to itself.
+         */
+        if (arg->root) {
+                result->size = arg->total_size;
+                result->head = (long *)calloc(arg->total_size, sizeof(long));
+
+                if (NULL == result->head) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                memcpy(result->head,
+                       running_result.head,
+                       running_result.size * sizeof(long));
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        /*
+         * 4.2
+         * The concatenation of all the lists is the final sorted list.
+         * 'i' denotes the sending process in each iteration.
+         *
+         * NOTE: 'last_size' is only meaningful in the root process.
+         */
+        for (int i = 1, last_size = running_result.size, merged_size = 0;
+             i < arg->process;
+             ++i) {
+                if (arg->root) {
+                        MPI_Recv(&merged_size,
+                                 1,
+                                 MPI_INT,
+                                 i,
+                                 MPI_ANY_TAG,
+                                 MPI_COMM_WORLD,
+                                 MPI_STATUSES_IGNORE);
+
+                        MPI_Recv(result->head + last_size,
+                                 merged_size,
+                                 MPI_LONG,
+                                 i,
+                                 MPI_ANY_TAG,
+                                 MPI_COMM_WORLD,
+                                 MPI_STATUSES_IGNORE);
+                        last_size += merged_size;
+#if 0
+                        memcpy(arg->head + last_size,
+                               arg[i].result,
+                               arg[i].result_size * sizeof(long));
+                        last_size += arg[i].result_size;
+#endif
+                } else if (i == arg->id) {
+                        MPI_Ssend(&running_result.size,
+                                  1,
+                                  MPI_INT,
+                                  0,
+                                  0,
+                                  MPI_COMM_WORLD);
+
+                        MPI_Ssend(running_result.head,
+                                  running_result.size,
+                                  MPI_LONG,
+                                  0,
+                                  0,
+                                  MPI_COMM_WORLD);
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+        free(running_result.head);
+}
+/* -------------------------------- Phase 4 -------------------------------- */
 
 static int long_compare(const void *left, const void *right)
 {

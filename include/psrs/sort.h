@@ -32,10 +32,6 @@ struct process_arg {
          * for each process.
          */
         int total_size;
-
-        /* Placed to stack. */
-        long *result;
-        int result_size;
 };
 
 void sort_launch(const struct cli_arg *const arg);
@@ -44,7 +40,8 @@ int part_blk_destroy(struct part_blk **self);
 
 #ifdef PSRS_SORT_ONLY
 static void
-psort_launch(double *elapsed, const struct cli_arg *const arg);
+psort_launch(double *const elapsed,
+             const struct cli_arg *const arg);
 
 static int
 sequential_sort(double *average, const struct cli_arg *const arg);
@@ -52,7 +49,11 @@ sequential_sort(double *average, const struct cli_arg *const arg);
 static void
 parallel_sort(double *elapsed, const struct process_arg *const arg);
 
-/* Phase 1 */
+/* Phase 1.1 */
+static void
+local_scatter(const struct process_arg *const arg);
+
+/* Phase 1.2 */
 static void
 local_sort(struct partition *const local_samples,
            const struct process_arg *const arg);
@@ -82,6 +83,10 @@ partition_send(struct part_blk *const blk_copy,
                int *const pindex,
                const struct process_arg *const arg);
 /* Phase 4 */
+static void
+partition_merge(struct partition *const result,
+                struct part_blk *blk_copy,
+                const struct process_arg *const arg);
 
 static int
 long_compare(const void *left, const void *right);
