@@ -47,11 +47,13 @@ static int
 sequential_sort(double *average, const struct cli_arg *const arg);
 
 static void
-parallel_sort(double *elapsed, const struct process_arg *const arg);
+parallel_sort(double *elapsed,
+              long array[const],
+              struct process_arg *const arg);
 
 /* Phase 1.1 */
 static void
-local_scatter(const struct process_arg *const arg);
+local_scatter(long array[const], struct process_arg *const arg);
 
 /* Phase 1.2 */
 static void
@@ -98,10 +100,16 @@ array_merge(long output[const],
             const long right[const],
             const size_t rsize);
 
-static int bin_search(int *const index,
-                      const long value,
-                      const long array[const],
-                      const int size);
+static int
+bin_search(int *const index,
+           const long value,
+           const long array[const],
+           const int size);
+
+static inline void
+mpi_recv_check(const MPI_Status *const status,
+               MPI_Datatype datatype,
+               const int count);
 #endif
 
 #endif /* SORT_H */

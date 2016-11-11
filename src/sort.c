@@ -185,55 +185,7 @@ psort_launch(double *const elapsed,
                 }
         }
 
-        /*
-         * Each process allocate the memory needed to store the sub-array.
-         *
-         * NOTE: Ownership is preserved in this function.
-         */
-        process_info.head = (long *)calloc(process_info.size, sizeof(long));
-
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        /*
-         * Last process broadcast the 'max_sample_size' member to every
-         * other process.
-         */
-        MPI_Bcast(&(process_info.max_sample_size),
-                  1,
-                  MPI_INT,
-                  arg->process - 1,
-                  MPI_COMM_WORLD);
-
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        /* Scatter the sub-array to each process. */
-        MPI_Scatter(array,
-                    chunk_size,
-                    MPI_LONG,
-                    process_info.head,
-                    chunk_size,
-                    MPI_LONG,
-                    0,
-                    MPI_COMM_WORLD);
-
-#if 0
-        puts("\n------------------------------");
-        puts("Phase 1.1: Scattering Sub-Arrays to Each Process");
-        puts("\n------------------------------");
-        for (int i = 0; i < arg->process; ++i) {
-                if (process_info.id == i) {
-                        printf("Sub-array of process #%d\n", process_info.id);
-                        for (int j = 0; j < process_info.size; ++j) {
-                                printf("%ld\t", process_info.head[j]);
-                        }
-                        puts("\n------------------------------");
-                }
-                MPI_Barrier(MPI_COMM_WORLD);
-        }
-#endif
-
-        parallel_sort(&one_time_elapsed, &process_info);
-        free(process_info.head);
+        parallel_sort(&one_time_elapsed, array, &process_info);
 
         *elapsed = one_time_elapsed;
 
@@ -294,7 +246,10 @@ static int sequential_sort(double *average, const struct cli_arg *const arg)
         return 0;
 }
 
-static void parallel_sort(double *elapsed, const struct process_arg *const arg)
+static void
+parallel_sort(double *elapsed,
+              long array[const],
+              struct process_arg *const arg)
 {
         struct timespec start;
 
@@ -332,7 +287,13 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
         }
 
         /*
-         * Phase 1
+         * Phase 1.1
+         *
+         * Scatter the generated 'array' to each process from root.
+         */
+        local_scatter(array, arg);
+        /*
+         * Phase 1.2
          *
          * Local regular samples of all process are written into
          * 'local_samples' structure.
@@ -391,9 +352,13 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
          * which merely records the beginning addresses and size for each
          * partition and no copy is involved.
          *
-         * NOTE: Ownership of 'blk' is transferred to 'partition_exchange'
+         * NOTE:
+         * Ownership of 'blk' is transferred to 'partition_exchange'
          * function; the partition copies would be written into 'blk_copy'
-         * structure after the function returns.
+         * structure after the function returns; the initial sorted local
+         * array stored in 'arg->head' is no longer needed for each process
+         * after the partition exchange is done, so its ownership is hand
+         * over to 'partition_exchange' as well.
          */
         if (0 > part_blk_init(&blk_copy, true, pivots.size + 1)) {
                 MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -450,11 +415,68 @@ static void parallel_sort(double *elapsed, const struct process_arg *const arg)
                 free(result.head);
 #endif
         }
+        MPI_Barrier(MPI_COMM_WORLD);
 }
 
 /* ------------------------------- Phase 1.1 ------------------------------- */
 static void
-local_scatter(const struct process_arg *const arg);
+local_scatter(long array[const], struct process_arg *const arg)
+{
+        /*
+         * NOTE:
+         * 'array' should be 'NULL' for every process other than root.
+         */
+        if ((arg->root && NULL == array) || (!arg->root && NULL != array) ||\
+            NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+        /*
+         * Each process allocate the memory needed to store the sub-array.
+         *
+         * NOTE: Ownership is transferred back to caller.
+         */
+        arg->head = (long *)calloc(arg->size, sizeof(long));
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        /*
+         * Last process broadcast the 'max_sample_size' member to every
+         * other process.
+         */
+        MPI_Bcast(&(arg->max_sample_size),
+                  1,
+                  MPI_INT,
+                  arg->process - 1,
+                  MPI_COMM_WORLD);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        /* Scatter the sub-array to each process. */
+        MPI_Scatter(array,
+                    arg->size,
+                    MPI_LONG,
+                    arg->head,
+                    arg->size,
+                    MPI_LONG,
+                    0,
+                    MPI_COMM_WORLD);
+
+#if 0
+        puts("\n------------------------------");
+        puts("Phase 1.1: Scattering Sub-Arrays to Each Process");
+        puts("\n------------------------------");
+        for (int i = 0; i < arg->process; ++i) {
+                if (arg->id == i) {
+                        printf("Sub-array of process #%d\n", arg->id);
+                        for (int j = 0; j < arg->size; ++j) {
+                                printf("%ld\t", arg->head[j]);
+                        }
+                        puts("\n------------------------------");
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+#endif
+}
 /* ------------------------------- Phase 1.1 ------------------------------- */
 
 /* ------------------------------- Phase 1.2 ------------------------------- */
@@ -530,10 +552,15 @@ pivots_bcast(struct partition *const pivots,
              const struct process_arg *const arg)
 {
         /* ρ (rho) = floor(p / 2) */
-        int pivot_step = arg->process / 2;
+        int pivot_step = 0;
         struct list *pivot_list = NULL;
         struct partition total_samples;
 
+        if (NULL == pivots || NULL == local_samples || NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        pivot_step = arg->process / 2;
         memset(pivots, 0, sizeof(struct partition));
         memset(&total_samples, 0, sizeof(struct partition));
 
@@ -676,6 +703,10 @@ partition_form(struct part_blk *const blk,
         int prev_part_size = 0;
         long pivot = 0;
 
+        if (NULL == blk || NULL == pivots || NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
         blk->part[part_idx].head = arg->head;
         for (int pivot_idx = 0; pivot_idx < pivots->size; ++pivot_idx) {
                 pivot = pivots->head[pivot_idx];
@@ -749,6 +780,10 @@ partition_exchange(struct part_blk *const blk_copy,
 {
         int part_idx = 0;
 
+        if (NULL == blk_copy || NULL == blk || NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
         /* i identifies the current sending process. */
         for (int i = 0; i < arg->process; ++i) {
                 partition_send(blk_copy, blk, i, &part_idx, arg);
@@ -757,6 +792,7 @@ partition_exchange(struct part_blk *const blk_copy,
         if (0 > part_blk_destroy(&blk)) {
                 MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
+        free(arg->head);
 
 #if 0
         int per_process_size = 0, total_size = 0;
@@ -799,11 +835,14 @@ partition_send(struct part_blk *const blk_copy,
                int *const pindex,
                const struct process_arg *const arg)
 {
+        MPI_Status recv_status;
+
         if (NULL == blk_copy || NULL == blk ||\
             0 > sid || NULL == pindex || 0 > *pindex || NULL == arg) {
                 MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 
+        memset(&recv_status, 0, sizeof(MPI_Status));
         /*
          * Copy the corresponding partition to itself if the current sending
          * process is the same as 'arg->id'.
@@ -820,6 +859,30 @@ partition_send(struct part_blk *const blk_copy,
                        blk->part[arg->id].size * sizeof(long));
                 ++*pindex;
         }
+        /*
+         * From 5.7 (Chapter 5 Section 7) of
+         * Multicore and GPU Programming
+         * "
+         * MPI_Send is called a blocking send operation, implying that the
+         * sender blocks until the message is delivered. However, this term is
+         * misleading because the function may return before the message is
+         * delivered!
+         *
+         * MPI_Send uses the so called standard communication mode. What really
+         * happens is that MPI decides, based on the size of the message,
+         * whether to block the call until the destination process collects it
+         * or to return before a matching receive is issued.
+         *
+         * The latter is chosen if the message is small enough, making
+         * MPI_Send locally blocking, i.e., the function returns as soon as the
+         * message is copied to a local MPI buffer, boosting CPU utilization.
+         * "
+         *
+         * In this partition sending case, a globally blocking send operation
+         * is needed for the sender to ensure that the destination process has
+         * actually retrieved the message.
+         */
+
         /* j identifies the partition to be sent. */
         for (int j = 0; j < arg->process; ++j) {
                 /*
@@ -847,7 +910,10 @@ partition_send(struct part_blk *const blk_copy,
                                          sid,
                                          MPI_ANY_TAG,
                                          MPI_COMM_WORLD,
-                                         MPI_STATUSES_IGNORE);
+                                         &recv_status);
+                                mpi_recv_check(&recv_status,
+                                               MPI_INT,
+                                               1);
                                 blk_copy->part[*pindex].head =(long *)calloc(\
                                                 blk_copy->part[*pindex].size,
                                                 sizeof(long));
@@ -861,7 +927,10 @@ partition_send(struct part_blk *const blk_copy,
                                          sid,
                                          MPI_ANY_TAG,
                                          MPI_COMM_WORLD,
-                                         MPI_STATUSES_IGNORE);
+                                         &recv_status);
+                                mpi_recv_check(&recv_status,
+                                               MPI_LONG,
+                                               blk_copy->part[*pindex].size);
                                 ++*pindex;
                         }
                 }
@@ -878,8 +947,14 @@ partition_merge(struct partition *const result,
 {
         struct partition running_result;
         struct partition merge_dump;
+        MPI_Status recv_status;
+
+        if (NULL == result || NULL == blk_copy || NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
 
         memset(result, 0, sizeof(struct partition));
+        memset(&recv_status, 0, sizeof(MPI_Status));
 
         /* Perform a shallow copy of the 1st partition. */
         running_result = blk_copy->part[0];
@@ -945,7 +1020,10 @@ partition_merge(struct partition *const result,
                                  i,
                                  MPI_ANY_TAG,
                                  MPI_COMM_WORLD,
-                                 MPI_STATUSES_IGNORE);
+                                 &recv_status);
+                        mpi_recv_check(&recv_status,
+                                       MPI_INT,
+                                       1);
 
                         MPI_Recv(result->head + last_size,
                                  merged_size,
@@ -953,7 +1031,10 @@ partition_merge(struct partition *const result,
                                  i,
                                  MPI_ANY_TAG,
                                  MPI_COMM_WORLD,
-                                 MPI_STATUSES_IGNORE);
+                                 &recv_status);
+                        mpi_recv_check(&recv_status,
+                                       MPI_LONG,
+                                       merged_size);
                         last_size += merged_size;
 #if 0
                         memcpy(arg->head + last_size,
@@ -1047,10 +1128,11 @@ static int array_merge(long output[const],
         return 0;
 }
 
-static int bin_search(int *const index,
-                      const long value,
-                      const long array[const],
-                      const int size)
+static int
+bin_search(int *const index,
+           const long value,
+           const long array[const],
+           const int size)
 {
         int start, middle, end;
 
@@ -1075,4 +1157,26 @@ static int bin_search(int *const index,
         *index = start;
 
         return 0;
+}
+
+/*
+ * Checks whether the number of elements received actually matches the
+ * amount expected.
+ */
+static inline void
+mpi_recv_check(const MPI_Status *const status,
+               MPI_Datatype datatype,
+               const int count)
+{
+        int received = 0;
+
+        if (NULL == status || 0 > count) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        MPI_Get_count(status, datatype, &received);
+
+        if (received != count) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
 }
