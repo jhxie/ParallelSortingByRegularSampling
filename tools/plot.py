@@ -74,9 +74,9 @@ def speedup_plot(program: str, output: str) -> Dict[RunTimeKey, List[ValPair]]:
     program = mpi_prefix + program + psrs_flags
     argument_dict = dict(run=7, seed=10, window=5)
     process_range = tuple(2 ** e for e in range(4))
-    # length_range = tuple(2 ** e for e in range(21, 28, 2))
+    length_range = tuple(2 ** e for e in range(21, 28, 2))
     # length_range = tuple(2 ** e for e in range(19, 26, 2))
-    length_range = tuple(2 ** e for e in range(9, 16, 2))
+    # length_range = tuple(2 ** e for e in range(9, 16, 2))
     legend_range = ("o", "s", "^", "*")
     color_range = ("g", "y", "m", "r")
     runtime_keys = [(length, process_range) for length in length_range]
