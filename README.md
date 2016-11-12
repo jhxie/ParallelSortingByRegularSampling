@@ -36,8 +36,8 @@ To get usage help from the compiled program obtained from the last section:
 cd src
 mpiexec -n 1 ./psrs -h
 ```
-For example, to obtain the running time of one process quick sort to be used as
-a baseline for comparison:
+For example, to obtain the mean sorting time and standard deviation of one
+process quick sort to be used as a baseline for comparison:
 ```bash
 mpiexec -n 1 ./psrs -l 10000000 -r 7 -s 10 -w 5
 ```
@@ -50,22 +50,41 @@ flag denotes the window size for calculating moving average (number of runs
 must not be less than window size; otherwise moving average can not be
 calculated).
 
-If needed, the average can be printed in binary form (double precision
+If needed, the mean sorting time along with its standard deviation (when both
+*-r* and *-w* are set to *strictly greater* than 1, otherwise standard
+deviation would always be 0) can be printed in binary form (double precision
 floating-point value) by giving an extra *-b* flag - this is mostly useful for
-piping the average directly into another program.
+piping the output tuple directly into another program.
 
+The program also supports output statistics about per-phase running time by
+giving an extra *-p* flag; depends on whether *-b* flag is given, the output
+would be either a *4-element* tuple recording (moving-averaged) per-phase
+running time in binary or text form of the following format:
+
+> PHASE1,PHASE2,PHASE3,PHASE4
+
+**NOTE**:
+For simplicity of implementation, the author has made a decision that length
+of the generated array must be *divisible* by the number of processes.
+
+The program would print related warning message if this constraint is not
+satisfied.
 
 ## Speedup Comparison
 In order to get the speedup comparison graph using both array length and number
 of processes as independent variables, run the python script resides in *tools*
 subdirectory:
 ```bash
-python3 tools/plot.py -p build/src/psrs -s speedup.png -t table.png -r runtime.png
+python3 tools/plot.py -e ./build/src/psrs -d deviation.png -r runtime.png -p pie.png -s speedup.png -t table.png
+
 ```
-The argument for *-p* flag is the path pointing to the *psrs* executable
-compiled previously; *speedup.png*  is name of the speedup graph, *table.png*
-is the name of the summary table for actual runtime; *runtime.png* is the name
-of the bar chart visualization for comparing runtime grouped by array length.
+The argument for *-e* flag is the path pointing to the *psrs* executable
+compiled previously; *deviation.png* is the name of the standard deviation
+table; *runtime.png* is the name of the bar chart visualization for comparing
+runtime grouped by array length; *pie.png* is the base name (2 *png*s would be
+written with *0* and *1* appended) for per-phased run time pie chart;
+*speedup.png* is name of the speedup graph; *table.png* is the name of the
+summary table for actual runtime.
 
 Note that speedup ratios are calculated based on a collection of moving-average
 runtimes with window size of 5 and 7 runs in total, which are the runtime

@@ -20,7 +20,7 @@ void sort_launch(const struct cli_arg *const arg)
         int rank = 0;
         /*
          * For one-process sequential sort and non-phased version of PSRS,
-         * the outputs are the same: an array with the member 'AVERAGE'
+         * the outputs are the same: an array with the member 'MEAN'
          * along with 'STDEV' are stored.
          *
          * NOTE:
