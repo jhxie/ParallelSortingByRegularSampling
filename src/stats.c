@@ -1,6 +1,7 @@
 #include "psrs/stats.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 
 int moving_window_init(struct moving_window **self, const size_t length)
@@ -120,5 +121,69 @@ int moving_average_calc(const struct moving_window *window, double *average)
         ring_iter_destroy(&iter);
 
         *average = result;
+        return 0;
+}
+
+int moving_stdev_calc(const struct moving_window *window, double *stdev)
+{
+        double average = 0;
+        double summation = 0;
+        double result = 0;
+        double *current = NULL;
+        size_t window_size = 0U;
+        struct ring_iter *iter = NULL;
+
+        if (NULL == window || NULL == stdev) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        /*
+         * Since both 'window' and '&window_size' cannot be NULL at this point,
+         * so this function call must succeed.
+         */
+        ring_length(window->ring, &window_size);
+
+        /*
+         * If the number of elements 'written' in total is less than
+         * the actual 'window_size', standard deviation can not be calculated.
+         * For example, if the 'window_size' is 4, and there are only 2 numbers
+         * available in the window (ring), the rest of 2 buffers in window
+         * (ring) would be empty.
+         */
+        if (window->written < window_size) {
+                errno = ENOTSUP;
+                return -1;
+        }
+
+        if (0 > ring_iter_init(&iter, window->ring)) {
+                return -1;
+        }
+
+        if (0 > moving_average_calc(window, &average)) {
+                return -1;
+        }
+
+        for (size_t i = 0U; i < window_size; ++i) {
+                /* Both arguments can not be NULL; return value unchecked. */
+                ring_iter_walk(iter, (void **)(&current));
+                /* Sum of Squares */
+                summation += pow(((*current) - average), 2);
+        }
+
+        if (1U == window_size) {
+                result = sqrt(summation / (double)window_size);
+        } else {
+                /*
+                 * Apply Bessel's correction to the result standard
+                 * deviation when the sample size > 1.
+                 */
+                result = sqrt(summation / ((double)window_size - 1));
+        }
+
+        /* 'iter' can not be NULL; return value unchecked. */
+        ring_iter_destroy(&iter);
+
+        *stdev = result;
         return 0;
 }

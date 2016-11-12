@@ -71,12 +71,14 @@ int main(int argc, char *argv[])
                         printf("Process #%d\n", rank);
                         printf("Binary: %u\n"
                                "Length: %d\n"
+                               "Phase: %u\n"
                                "Run: %u\n"
                                "Seed: %u\n"
                                "Process: %d\n"
                                "Window: %u\n",
                                arg.binary,
                                arg.length,
+                               arg.phase,
                                arg.run,
                                arg.seed,
                                arg.process,
@@ -112,11 +114,12 @@ int main(int argc, char *argv[])
 static int argument_parse(struct cli_arg *result, int argc, char *argv[])
 {
         /* NOTE: All the flags followed by an extra colon require arguments. */
-        static const char *const OPT_STR = ":bhl:r:s:t:w:";
+        static const char *const OPT_STR = ":bhl:pr:s:w:";
         static const struct option OPTS[] = {
                 {"binary",   no_argument,       NULL, 'b'},
                 {"help",     no_argument,       NULL, 'h'},
                 {"length",   required_argument, NULL, 'l'},
+                {"phase",    no_argument,       NULL, 'p'},
                 {"run",      required_argument, NULL, 'r'},
                 {"seed",     required_argument, NULL, 's'},
                 {"window",   required_argument, NULL, 'w'},
@@ -154,8 +157,15 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                 return -1;
         }
 
-        /* By default, output average value in human readable form. */
+        /*
+         * By default, output average sorting time(s) in human readable form.
+         */
         result->binary = false;
+        /*
+         * By default, output a single total sorting time.
+         * Output per-phase sorting time (phase 1 to 4) if set to 'true'.
+         */
+        result->phase = false;
 
         while (-1 != (opt = getopt_long(argc, argv, OPT_STR, OPTS, NULL))) {
                 /*
@@ -187,6 +197,9 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
                         check[LENGTH] = true;
                         break;
                 }
+                case 'p':
+                        result->phase = true;
+                        break;
                 case 'r': {
                         if (0 > unsigned_convert(&result->run, optarg)) {
                                 usage_show(program_name,
@@ -262,6 +275,20 @@ static int argument_parse(struct cli_arg *result, int argc, char *argv[])
         free(program_name);
 
         MPI_Comm_size(MPI_COMM_WORLD, &(result->process));
+
+        if (0 != result->length % result->process) {
+                usage_show(program_name,
+                           EXIT_FAILURE,
+                           "Length is not divisible by the number of "
+                           "process(es)");
+        }
+
+        if (result->phase && 1 >= result->process) {
+                usage_show(program_name,
+                           EXIT_FAILURE,
+                           "Phase can not be used when there is "
+                           "only one process");
+        }
         return 0;
 }
 
@@ -275,6 +302,8 @@ static void argument_bcast(struct cli_arg *arg)
         MPI_Bcast(&(arg->binary), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
         MPI_Barrier(MPI_COMM_WORLD);
         MPI_Bcast(&(arg->length), 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Bcast(&(arg->phase), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
         MPI_Barrier(MPI_COMM_WORLD);
         MPI_Bcast(&(arg->run), 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
         MPI_Barrier(MPI_COMM_WORLD);
@@ -299,13 +328,15 @@ static void usage_show(const char *name, int status, const char *msg)
                 "%s [-h]\n"
                 "[-b]\n"
                 "[-l LENGTH_OF_ARRAY]\n"
+                "[-p]\n"
                 "[-r NUMBER_OF_RUNS]\n"
                 "[-s SEED]\n"
                 "[-w MOVING_WINDOW_SIZE]\n\n"
 
                 "[" ANSI_COLOR_BLUE "Optional Arguments" ANSI_COLOR_RESET "]\n"
                 "-b, --binary\tgive binary output instead of text\n"
-                "-h, --help\tshow this help message and exit\n\n"
+                "-h, --help\tshow this help message and exit\n"
+                "-p, --phase\tshow per-phase sorting time instead of total\n\n"
 
                 "[" ANSI_COLOR_BLUE "Required Arguments" ANSI_COLOR_RESET "]\n"
                 "-l, --length\tlength of the array to be sorted\n"
@@ -321,6 +352,9 @@ static void usage_show(const char *name, int status, const char *msg)
                 ANSI_COLOR_MAGENTA "SEED" ANSI_COLOR_RESET
                 " to the same value used for single process.\n"
                 "3. "
+                ANSI_COLOR_MAGENTA "LENGTH_OF_ARRAY" ANSI_COLOR_RESET
+                " must be divisible by the number of process(es).\n"
+                "4. "
                 ANSI_COLOR_MAGENTA "%d " ANSI_COLOR_RESET
                 "is the optimal number of processes to be chosen.\n",
                 NULL == name ? "" : name, get_nprocs());

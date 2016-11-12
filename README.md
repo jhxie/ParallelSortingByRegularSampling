@@ -13,6 +13,11 @@ algorithm.
 ```bash
 sudo apt-get install build-essential cmake cmake-extras extra-cmake-modules libmpich-dev mpich python3-matplotlib
 ```
+A script that can automate the above process is named
+[prepare.sh](./tools/prepare.sh); to run the script:
+```bash
+bash ./tools/prepare.sh
+```
 
 ## Build Instructions
 Change working directory to where the source directory resides and then issue:
@@ -90,6 +95,8 @@ And a corresponding comparison bar chart:
 * The Matplotlib CMake module is borrowed from the source repository of
 [FreeCAD](
 https://github.com/FreeCAD/FreeCAD/blob/master/cMake/FindMatplotlib.cmake).
+* The paper illustrates the *Parallel Sorting by Regular Sampling* algorithm
+can be found [here](./doc/PSRS.pdf).
 
 
 ## License

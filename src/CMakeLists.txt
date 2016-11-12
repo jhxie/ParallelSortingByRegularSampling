@@ -23,7 +23,7 @@ endif()
 
 # ----------------------------- EXPERIMENTATION -------------------------------
 
-# add_executable(main "main.c")
+# add_executable(main "main.c" "ring.c" "stats.c")
 #
 # target_link_libraries(main ${MPI_C_LIBRARIES} m)
 # if(MPI_C_COMPILE_FLAGS)

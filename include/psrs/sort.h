@@ -34,22 +34,54 @@ struct process_arg {
         int total_size;
 };
 
-void sort_launch(const struct cli_arg *const arg);
-int part_blk_init(struct part_blk **self, bool clean, int size);
-int part_blk_destroy(struct part_blk **self);
+enum sort_stat {
+        MEAN,
+        STDEV,
+        SORT_STAT_SIZE
+};
+/*
+ * Used for indexing the array passed as a parameter to 'psort_launch'
+ * and 'parallel_sort'.
+ *
+ * NOTE:
+ * Both 'psort_launch' and 'parallel_sort' calculate per-phase sorting time
+ * UN-CONDITIONALLY, in order to simplifly the implementation; 'sort_launch'
+ * would make the correct output based on the command line flags given.
+ */
+enum psrs_phase {
+        PHASE1,
+        PHASE2,
+        PHASE3,
+        PHASE4,
+        PHASE_COUNT
+};
+
+void
+sort_launch(const struct cli_arg *const arg);
+
+int
+part_blk_init(struct part_blk **self, bool clean, int size);
+
+int
+part_blk_destroy(struct part_blk **self);
 
 #ifdef PSRS_SORT_ONLY
 static void
-psort_launch(double *const elapsed,
-             const struct cli_arg *const arg);
+output_write(double data[const], const struct cli_arg *const arg);
 
 static int
-sequential_sort(double *average, const struct cli_arg *const arg);
+sequential_sort(double ssort_stats[const], const struct cli_arg *const arg);
 
 static void
-parallel_sort(double *elapsed,
-              long array[const],
-              struct process_arg *const arg);
+parallel_sort(double psort_stats[const], const struct cli_arg *const arg);
+
+static void
+psort_launch(double elapsed[const], const struct cli_arg *const arg);
+
+static void
+psort_start(double elapsed[const],
+            long array[const],
+            struct process_arg *const arg);
 
 /* Phase 1.1 */
 static void

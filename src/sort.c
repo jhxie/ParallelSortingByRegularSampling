@@ -18,49 +18,72 @@
 void sort_launch(const struct cli_arg *const arg)
 {
         int rank = 0;
-        double average = .0;
-        double n_process_time = .0;
-        struct moving_window *window = NULL;
+        /*
+         * For one-process sequential sort and non-phased version of PSRS,
+         * the outputs are the same: an array with the member 'AVERAGE'
+         * along with 'STDEV' are stored.
+         *
+         * NOTE:
+         * Refer to the definition of 'enum sort_stat' in 'include/psrs/sort.h'
+         * for details.
+         */
+        double ssort_data[SORT_STAT_SIZE];
+        double psort_data[SORT_STAT_SIZE];
+
+        /*
+         * For a per-phase sorting time, the output is simply the time taken
+         * for each separate phase.
+         * The array is indexed with 'PHASE1' up to 'PHASE4'.
+         *
+         * NOTE:
+         * Refer to the definition of 'enum psrs_phase' in
+         * 'include/psrs/sort.h' for details.
+         */
+        double psort_per_phase_data[PHASE_COUNT];
 
         if (NULL == arg || 0 == arg->process) {
                 errno = EINVAL;
                 MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
 
-        if (0 > moving_window_init(&window, arg->window)) {
-                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-        }
-
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+        /*
+         * If only 1 process is involved, use standard quick sort.
+         *
+         * NOTE: Average and standard deviation is calculated by
+         * 'sequential_sort' directly, so simply gather the result.
+         */
         if (1 == arg->process) {
-                if (0 > sequential_sort(&average, arg)) {
+                if (0 > sequential_sort(ssort_data, arg)) {
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                 }
+
         } else if (1 < arg->process) {
-                for (unsigned int i = 0; i < arg->run; ++i) {
-                        psort_launch(&n_process_time, arg);
-
-                        if (0 > moving_window_push(window, n_process_time)) {
-                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-                        }
-                        MPI_Barrier(MPI_COMM_WORLD);
-                }
-
-                if (0 > moving_average_calc(window, &average)) {
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                /*
+                 * NOTE:
+                 * The array size is different since the outputs
+                 * are different.
+                 */
+                if (arg->phase) {
+                        parallel_sort(psort_per_phase_data, arg);
+                } else {
+                        parallel_sort(psort_data, arg);
                 }
         }
 
         if (0 == rank) {
-                if (arg->binary) {
-                        fwrite(&average, sizeof(average), 1U, stdout);
-                } else {
-                        printf("%f\n", average);
+                if (1 == arg->process) {
+                        output_write(ssort_data, arg);
+                } else if (1 < arg->process) {
+                        if (arg->phase) {
+                                output_write(psort_per_phase_data, arg);
+                        } else {
+                                output_write(psort_data, arg);
+                        }
                 }
         }
 
-        moving_window_destroy(&window);
         MPI_Barrier(MPI_COMM_WORLD);
 }
 
@@ -113,14 +136,203 @@ int part_blk_destroy(struct part_blk **self)
 }
 
 static void
-psort_launch(double *const elapsed,
-             const struct cli_arg *const arg)
+output_write(double data[const], const struct cli_arg *const arg)
+{
+        if (NULL == data || NULL == arg) {
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+
+        if (1 == arg->process) {
+                if (arg->binary) {
+                        fwrite(data, sizeof(data[0]), SORT_STAT_SIZE, stdout);
+                } else {
+                        puts("Mean Sorting Time, Standard Deviation");
+                        printf("%f, %f\n", data[MEAN], data[STDEV]);
+                }
+        } else if (1 < arg->process) {
+                if (arg->binary) {
+                        /* There are 4 elements for the per-phased data. */
+                        if (arg->phase) {
+                                fwrite(data,
+                                       sizeof(data[0]),
+                                       PHASE_COUNT,
+                                       stdout);
+                        } else {
+                                fwrite(data,
+                                       sizeof(data[0]),
+                                       SORT_STAT_SIZE,
+                                       stdout);
+                        }
+                } else {
+                        /* There are 4 elements for the per-phased data. */
+                        if (arg->phase) {
+                                puts("Phase 1, Phase 2, Phase 3, Phase 4");
+                                printf("%f, %f, %f, %f\n",
+                                       data[PHASE1],
+                                       data[PHASE2],
+                                       data[PHASE3],
+                                       data[PHASE4]);
+                        } else {
+                                puts("Mean Sorting Time, Standard Deviation");
+                                printf("%f, %f\n", data[MEAN], data[STDEV]);
+                        }
+                }
+        }
+}
+
+static int
+sequential_sort(double ssort_stats[const], const struct cli_arg *const arg)
+{
+        double elapsed = 0, one_process_avg = 0, one_process_stdev = 0;
+        long *array = NULL;
+        struct timespec start;
+        struct moving_window *window = NULL;
+
+        if (NULL == ssort_stats || NULL == arg) {
+                errno = EINVAL;
+                return -1;
+        }
+
+        if (0 > moving_window_init(&window, arg->window)) {
+                return -1;
+        }
+
+        if (0 > array_generate(&array, arg->length, arg->seed)) {
+                return -1;
+        }
+
+        timing_reset(&start);
+        /*
+         * If the number of threads needs to be executed is 1, pthread APIs
+         * need not to be invoked.
+         */
+        for (size_t iteration = 0U; iteration < arg->run; ++iteration) {
+                timing_start(&start);
+                qsort(array, arg->length, sizeof(long), long_compare);
+                timing_stop(&elapsed, &start);
+                timing_reset(&start);
+                /*
+                 * Revert the unsorted version back into array
+                 * using the same seed: no new memory is allocated.
+                 */
+                if (0 > array_generate(&array, arg->length, arg->seed)) {
+                        return -1;
+                }
+                moving_window_push(window, elapsed);
+                elapsed = .0;
+        }
+
+        if (0 > moving_average_calc(window, &one_process_avg)) {
+                return -1;
+        }
+
+        if (0 > moving_stdev_calc(window, &one_process_stdev)) {
+                return -1;
+        }
+
+        array_destroy(&array);
+        moving_window_destroy(&window);
+
+        ssort_stats[MEAN] = one_process_avg;
+        ssort_stats[STDEV] = one_process_stdev;
+        return 0;
+}
+
+static void
+parallel_sort(double psort_stats[const], const struct cli_arg *const arg)
+{
+        /*
+         * Sorting time per-phase; all the fields are filled regardless
+         * of the value of 'arg->phase'.
+         */
+        double sort_time[PHASE_COUNT];
+        double total_sort_time;
+        struct moving_window *phase_wdw[PHASE_COUNT];
+        struct moving_window *total_wdw = NULL;
+
+        memset(sort_time, 0, sizeof sort_time);
+
+        if (arg->phase) {
+                memset(phase_wdw, 0, sizeof phase_wdw);
+
+                /*
+                 * Initialize 4 parallel windows in order to calculate the
+                 * moving average for each phase.
+                 */
+                for (int j = PHASE1; j < PHASE_COUNT; ++j) {
+                        if (0 > moving_window_init(&(phase_wdw[j]),
+                                                   arg->window)) {
+                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                        }
+                }
+        } else {
+                if (0 > moving_window_init(&total_wdw, arg->window)) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+        }
+
+        for (unsigned int i = 0; i < arg->run; ++i) {
+                /*
+                 * 'sort_time' always records sorting times per phase per run.
+                 */
+                psort_launch(sort_time, arg);
+
+                if (arg->phase) {
+                        for (int j = PHASE1; j < PHASE_COUNT; ++j) {
+                                if (0 > moving_window_push(phase_wdw[j],
+                                                           sort_time[j])) {
+                                        MPI_Abort(MPI_COMM_WORLD,
+                                                  EXIT_FAILURE);
+                                }
+                        }
+                } else {
+                        total_sort_time = 0;
+                        for (int j = 0; j < PHASE_COUNT; ++j) {
+                                total_sort_time += sort_time[j];
+                        }
+                        /*
+                         * If 'arg->phase' is 'false', a moving average based
+                         * on a series of total sorting time can be calculated.
+                         */
+                        if (0 > moving_window_push(total_wdw,
+                                                   total_sort_time)) {
+                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                        }
+                }
+                MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+        /*
+         * NOTE:
+         * The size of 'psort_stats' differs depends on whether 'arg->phase'
+         * is set to 'true'.
+         */
+        if (arg->phase) {
+                for (int j = PHASE1; j < PHASE_COUNT; ++j) {
+                        if (0 > moving_average_calc(phase_wdw[j],
+                                                    &(psort_stats[j]))) {
+                                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                        }
+                        moving_window_destroy(&(phase_wdw[j]));
+                }
+        } else {
+                if (0 > moving_average_calc(total_wdw, &(psort_stats[MEAN]))) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                if (0 > moving_stdev_calc(total_wdw, &(psort_stats[STDEV]))) {
+                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                }
+                moving_window_destroy(&total_wdw);
+        }
+}
+
+static void
+psort_launch(double elapsed[const], const struct cli_arg *const arg)
 {
         long *array = NULL;
         /* Number of elements to be processed per process. */
         int chunk_size = (int)ceil((double)arg->length / arg->process);
         struct process_arg process_info;
-        double one_time_elapsed = 0;
 
         if (NULL == elapsed || NULL == arg) {
                 errno = EINVAL;
@@ -185,71 +397,17 @@ psort_launch(double *const elapsed,
                 }
         }
 
-        parallel_sort(&one_time_elapsed, array, &process_info);
-
-        *elapsed = one_time_elapsed;
+        psort_start(elapsed, array, &process_info);
 
         if (process_info.root) {
                 array_destroy(&array);
         }
 }
 
-static int sequential_sort(double *average, const struct cli_arg *const arg)
-{
-        double elapsed = .0, one_thread_average = .0;
-        long *array = NULL;
-        struct timespec start;
-        struct moving_window *window = NULL;
-
-        if (NULL == average || NULL == arg) {
-                errno = EINVAL;
-                return -1;
-        }
-
-        if (0 > moving_window_init(&window, arg->window)) {
-                return -1;
-        }
-
-        if (0 > array_generate(&array, arg->length, arg->seed)) {
-                return -1;
-        }
-
-        timing_reset(&start);
-        /*
-         * If the number of threads needs to be executed is 1, pthread APIs
-         * need not to be invoked.
-         */
-        for (size_t iteration = 0U; iteration < arg->run; ++iteration) {
-                timing_start(&start);
-                qsort(array, arg->length, sizeof(long), long_compare);
-                timing_stop(&elapsed, &start);
-                timing_reset(&start);
-                /*
-                 * Revert the unsorted version back into array
-                 * using the same seed: no new memory is allocated.
-                 */
-                if (0 > array_generate(&array, arg->length, arg->seed)) {
-                        return -1;
-                }
-                moving_window_push(window, elapsed);
-                elapsed = .0;
-        }
-
-        if (0 > moving_average_calc(window, &one_thread_average)) {
-                return -1;
-        }
-
-        array_destroy(&array);
-        moving_window_destroy(&window);
-
-        *average = one_thread_average;
-        return 0;
-}
-
 static void
-parallel_sort(double *elapsed,
-              long array[const],
-              struct process_arg *const arg)
+psort_start(double elapsed[const],
+            long array[const],
+            struct process_arg *const arg)
 {
         struct timespec start;
 
@@ -303,6 +461,13 @@ parallel_sort(double *elapsed,
          */
         local_sort(&local_samples, arg);
 
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (arg->root) {
+                timing_stop(&(elapsed[PHASE1]), &start);
+                timing_reset(&start);
+                timing_start(&start);
+        }
+
         /*
          * Phase 2 - Find Pivots then Partition.
          */
@@ -340,6 +505,12 @@ parallel_sort(double *elapsed,
         }
         partition_form(blk, &pivots, arg);
 
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (arg->root) {
+                timing_stop(&(elapsed[PHASE2]), &start);
+                timing_reset(&start);
+                timing_start(&start);
+        }
         /*
          * Phase 3 - Exchange Partitions
          *
@@ -365,6 +536,12 @@ parallel_sort(double *elapsed,
         }
         partition_exchange(blk_copy, blk, arg);
 
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (arg->root) {
+                timing_stop(&(elapsed[PHASE3]), &start);
+                timing_reset(&start);
+                timing_start(&start);
+        }
         /*
          * Phase 4 - Merge Partitions
          *
@@ -374,9 +551,10 @@ parallel_sort(double *elapsed,
          */
         partition_merge(&result, blk_copy, arg);
 
+        MPI_Barrier(MPI_COMM_WORLD);
         /* End */
         if (arg->root) {
-                timing_stop(elapsed, &start);
+                timing_stop(&(elapsed[PHASE4]), &start);
 #ifdef PRINT_DEBUG_INFO
                 puts("\n------------------------------");
                 puts("Phase 5: Result Verification");
@@ -412,8 +590,8 @@ parallel_sort(double *elapsed,
                         puts("------------------------------");
                 }
                 free(cmp);
-                free(result.head);
 #endif
+                free(result.head);
         }
         MPI_Barrier(MPI_COMM_WORLD);
 }

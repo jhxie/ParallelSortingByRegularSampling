@@ -22,5 +22,6 @@ int moving_window_push(struct moving_window *self, const double value);
 int moving_window_destroy(struct moving_window **self);
 
 int moving_average_calc(const struct moving_window *window, double *average);
+int moving_stdev_calc(const struct moving_window *window, double *stdev);
 
 #endif /* STATS_H */

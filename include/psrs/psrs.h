@@ -12,7 +12,14 @@
  * easily without worrying about custom defined types.
  */
 struct cli_arg {
-        /* Whether output the moving average in binary format. */
+        /*
+         * Whether output the sorting time(s) (moving average)
+         * in binary format.
+         *
+         * NOTE: This is a boolean variable; however its actual type is
+         * not 'bool' because there is no 'MPI_BOOL' data type built-in
+         * for MPICH.
+         */
         unsigned int binary;
         /*
          * Contrary to common practice these days, the 'count' formal parameter
@@ -20,6 +27,15 @@ struct cli_arg {
          * similar convention needs to be maintained.
          */
         int length;
+        /*
+         * Whether output the sorting time(s) (moving average)
+         * in a per-phase format.
+         *
+         * NOTE: This is a boolean variable; however its actual type is
+         * not 'bool' because there is no 'MPI_BOOL' data type built-in
+         * for MPICH.
+         */
+        unsigned int phase;
         unsigned int run;
         unsigned int seed;
         /*

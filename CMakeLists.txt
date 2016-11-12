@@ -39,7 +39,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # set(GCC_SANITIZE_UNDEFINED_FLAG "-fsanitize=undefined")
 
 set(GCC_WARN_ALL "-Wall")
-set(GCC_WARN_EXTRA "-Wextra")
+# set(GCC_WARN_EXTRA "-Wextra")
 
 # issue warning if comparison operators are directly used for floats
 set(GCC_WARN_FLOAT_EQUAL_FLAG "-Wfloat-equal")
@@ -67,7 +67,7 @@ add_compile_options(
     # ${GCC_SANITIZE_LEAK_FLAG}
     # ${GCC_SANITIZE_UNDEFINED_FLAG}
     ${GCC_WARN_ALL}
-    ${GCC_WARN_EXTRA}
+    # ${GCC_WARN_EXTRA}
     ${GCC_WARN_FLOAT_EQUAL_FLAG}
     ${GCC_WARN_SHADOW_FLAG}
     ${GCC_WARN_POINTER_ARITH}
