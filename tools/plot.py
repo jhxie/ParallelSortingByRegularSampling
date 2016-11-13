@@ -50,7 +50,7 @@ def speedup_plot(program: str, output: str) -> Dict[RunTimeKey, List[ValPair]]:
     The PSRS program must support a command line interface of the following:
         ' -b -l {length} -r {run} -s {seed} -w {window}'
     and this function hard-coded the length to be range of:
-        [2 ** e for e in range(21, 28, 2)] -> 2 ** 21 -- 2 ** 27 with step 2
+        [2 ** e for e in range(19, 26, 2)] -> 2 ** 19 -- 2 ** 26 with step 2
     the number of processes is hard-coded to be range of:
         [2 ** e for e in range(4)] -> 2 ** 0 -- 2 ** 3
     the {run} is fixed at 7, and {window} is set to 5.
@@ -74,8 +74,8 @@ def speedup_plot(program: str, output: str) -> Dict[RunTimeKey, List[ValPair]]:
     program = mpi_prefix + program + psrs_flags
     argument_dict = dict(run=7, seed=10, window=5)
     process_range = tuple(2 ** e for e in range(4))
-    length_range = tuple(2 ** e for e in range(21, 28, 2))
-    # length_range = tuple(2 ** e for e in range(19, 26, 2))
+    # length_range = tuple(2 ** e for e in range(21, 28, 2))
+    length_range = tuple(2 ** e for e in range(19, 26, 2))
     # length_range = tuple(2 ** e for e in range(9, 16, 2))
     legend_range = ("o", "s", "^", "*")
     color_range = ("g", "y", "m", "r")

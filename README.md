@@ -71,6 +71,9 @@ The program would print related warning message if this constraint is not
 satisfied.
 
 ## Speedup Comparison
+**NOTE**:  
+Please refer to [REPORT.pdf](./doc/REPORT.pdf) for the detailed exposition.
+
 In order to get the speedup comparison graph using both array length and number
 of processes as independent variables, run the python script resides in *tools*
 subdirectory:
@@ -86,6 +89,10 @@ written with *0* and *1* appended) for per-phased run time pie chart;
 *speedup.png* is name of the speedup graph; *table.png* is the name of the
 summary table for actual runtime.
 
+To run the python script on a *RAC* cloud, two changes to the 'mpi_prefix'
+variables need to be made; the old rvalues need to be replaced by
+"mpiexec -n {process} -f /home/ubuntu/psrs/tools/mpi_hosts ".
+
 Note that speedup ratios are calculated based on a collection of moving-average
 runtimes with window size of 5 and 7 runs in total, which are the runtime
 values shown in the figure ("Running Time in Moving Average") below.
@@ -97,11 +104,11 @@ The result is obtained from the following input table:
 
 | Array Size | Number of Processes |
 |:----------:|:-------------------:|
-| 2²⁰        | 1 2 4 8 16          |
-| 2²²        | 1 2 4 8 16          |
-| 2²⁴        | 1 2 4 8 16          |
-| 2²⁶        | 1 2 4 8 16          |
-| 2²⁸        | 1 2 4 8 16          |
+| 2²⁰        | 1 2 4 8             |
+| 2²²        | 1 2 4 8             |
+| 2²⁴        | 1 2 4 8             |
+| 2²⁶        | 1 2 4 8             |
+| 2²⁸        | 1 2 4 8             |
 
 The actual runtime is recorded in the following table:
 ![table](./doc/table.png)
