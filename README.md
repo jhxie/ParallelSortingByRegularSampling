@@ -104,11 +104,10 @@ The result is obtained from the following input table:
 
 | Array Size | Number of Processes |
 |:----------:|:-------------------:|
-| 2²⁰        | 1 2 4 8             |
-| 2²²        | 1 2 4 8             |
-| 2²⁴        | 1 2 4 8             |
-| 2²⁶        | 1 2 4 8             |
-| 2²⁸        | 1 2 4 8             |
+| 2¹⁹        | 1 2 4 8             |
+| 2²¹        | 1 2 4 8             |
+| 2²³        | 1 2 4 8             |
+| 2²⁵        | 1 2 4 8             |
 
 The actual runtime is recorded in the following table:
 ![table](./doc/table.png)
