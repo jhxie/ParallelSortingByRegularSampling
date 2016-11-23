@@ -109,12 +109,25 @@ The result is obtained from the following input table:
 | 2²³        | 1 2 4 8             |
 | 2²⁵        | 1 2 4 8             |
 
-The actual runtime is recorded in the following table:
+The actual sorting time is recorded in the following table:
 ![table](./doc/table.png)
 
-And a corresponding comparison bar chart:
+And a table that records standard errors of those sorting times (last 5 runs of
+7 runs in total):
+![deviation](./doc/deviation.png)
+
+To get a bird's eye view of how those sorting times differ group-wise, a 3-d
+bar chart is drawn using both array size and number of processes as categorical
+variables:
 ![runtime](./doc/runtime.png)
 
+Two per-phase sorting-time comparison pie charts are also drawn to see what is
+the dominant phase; note the second phase of the 2²⁷ case is *0%*, which could
+be caused by floating point rounding errors as per-phase run time is divided by
+the total run time to get the percentage value shown:
+![pie0](./doc/pie0.png)
+
+![pie1](./doc/pie1.png)
 
 ## Credit
 * The Matplotlib CMake module is borrowed from the source repository of
@@ -122,7 +135,6 @@ And a corresponding comparison bar chart:
 https://github.com/FreeCAD/FreeCAD/blob/master/cMake/FindMatplotlib.cmake).
 * The paper illustrates the *Parallel Sorting by Regular Sampling* algorithm
 can be found [here](./doc/PSRS.pdf).
-
 
 ## License
 Copyright © 2016 Jiahui Xie  
