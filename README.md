@@ -135,9 +135,13 @@ the total run time to get the percentage value shown:
 https://github.com/FreeCAD/FreeCAD/blob/master/cMake/FindMatplotlib.cmake).
 * The paper illustrates the *Parallel Sorting by Regular Sampling* algorithm
 can be found [here](./doc/PSRS.pdf).
+* The reference book that provides guidelines on the proper use of MPI
+interface is titled
+*Using MPI: Portable Parallel Programming with the Message-Passing Interface*;
+its official [website](http://wgropp.cs.illinois.edu/usingmpiweb/) has lots of useful resources about MPI in general.
 
 ## License
-Copyright © 2016 Jiahui Xie  
+Copyright © 2016 - 2017 Jiahui Xie  
 Licensed under the [BSD 2-Clause License][BSD2].  
 Distributed under the [BSD 2-Clause License][BSD2].  
 

@@ -1,21 +1,21 @@
 language: c
 compiler:
-        - clang
-        - gcc
+    - clang
+    - gcc
 os:
-        - linux
+    - linux
 branches:
-        only:
-                - master
+    only:
+        - mpi
 sudo: required
 dist: trusty
 notifications:
-        email: false
+    email: false
 before_install:
-        - sudo apt-get update -qq
-        - sudo apt-get install -y \
-          cmake \
-          cmake-curses-gui \
-          cmake-extras \
-          extra-cmake-modules
-script: cmake -Bbuild -H. && make -C build
+    - sudo apt-get update -qq
+    - sudo apt-get install -y \
+      cmake \
+      cmake-curses-gui \
+      cmake-extras \
+      extra-cmake-modules
+script: mkdir build && cd build && cmake .. && make
